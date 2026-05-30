@@ -65,8 +65,8 @@ export const SUBJECT_COLORS = [
   '#84cc16', '#f97316',
 ]
 
-// Default fallback — used when the user has no custom cycle saved
-export const REVISION_INTERVALS = [1, 3, 7, 15, 30, 60, 120, 180]
+// Default cycle — 1, 4, 7, 21 days
+export const REVISION_INTERVALS = [1, 4, 7, 21]
 
 export interface RevisionCyclePreset {
   name: string
@@ -76,13 +76,18 @@ export interface RevisionCyclePreset {
 
 export const REVISION_CYCLE_PRESETS: RevisionCyclePreset[] = [
   {
+    name: 'ReviseFlow',
+    description: 'Default — focused 4-step cycle',
+    intervals: [1, 4, 7, 21],
+  },
+  {
     name: 'Standard',
-    description: 'Recommended for most exams',
+    description: 'Extended 8-step spaced repetition',
     intervals: [1, 3, 7, 15, 30, 60, 120, 180],
   },
   {
     name: 'Aggressive',
-    description: 'More frequent early revisions — great for high-stakes exams',
+    description: 'More frequent early revisions',
     intervals: [1, 2, 4, 7, 14, 21, 30, 60],
   },
   {
@@ -92,7 +97,7 @@ export const REVISION_CYCLE_PRESETS: RevisionCyclePreset[] = [
   },
   {
     name: 'Leitner 5-Box',
-    description: 'Classic Leitner system adapted for topic-based revision',
+    description: 'Classic Leitner system',
     intervals: [1, 3, 7, 21, 60],
   },
 ]

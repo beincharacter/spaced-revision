@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { format, addDays, parseISO } from 'date-fns'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -23,11 +23,22 @@ interface StudyDateDialogProps {
 export function StudyDateDialog({
   open, onClose, topicName, subjectName, subjectColor, customIntervals, onConfirm, loading
 }: StudyDateDialogProps) {
-  const defaultIntervals = customIntervals?.length ? customIntervals : REVISION_INTERVALS
   const [studyDate, setStudyDate] = useState(format(new Date(), 'yyyy-MM-dd'))
-  const [intervals, setIntervals] = useState<number[]>(defaultIntervals)
+  const [intervals, setIntervals] = useState<number[]>(
+    customIntervals?.length ? customIntervals : REVISION_INTERVALS
+  )
   const [cycleOpen, setCycleOpen] = useState(false)
   const [addValue, setAddValue] = useState('')
+
+  // Reset to the user's saved cycle every time the dialog opens
+  useEffect(() => {
+    if (open) {
+      setStudyDate(format(new Date(), 'yyyy-MM-dd'))
+      setIntervals(customIntervals?.length ? customIntervals : REVISION_INTERVALS)
+      setCycleOpen(false)
+      setAddValue('')
+    }
+  }, [open, customIntervals])
 
   const parsedDate = parseISO(studyDate)
   const sorted = [...intervals].sort((a, b) => a - b)
