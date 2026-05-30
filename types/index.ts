@@ -49,6 +49,7 @@ export interface Revision {
   completed_at: string | null
   status: RevisionStatus
   outcome: RevisionOutcome
+  google_event_id: string | null
   created_at: string
   topic?: Topic & { subject?: Subject }
 }
