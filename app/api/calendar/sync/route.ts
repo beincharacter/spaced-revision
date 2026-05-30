@@ -70,7 +70,7 @@ export async function POST(request: Request) {
         subjectName ? `Subject: ${subjectName}` : '',
         `Revision #${rev.revision_number}`,
         '',
-        'Scheduled by ReviseFlow',
+        'ofcourse ILOVEYOU <3',
       ].filter(Boolean).join('\n'),
       reminderMinutes,
       timeZone,

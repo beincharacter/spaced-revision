@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { SyncDialog } from '@/components/calendar/sync-dialog'
 import type { Revision } from '@/types'
-import { ChevronLeft, ChevronRight, CalendarDays, RefreshCw, Trash2, GoogleChrome } from 'lucide-react'
+import { ChevronLeft, ChevronRight, CalendarDays, RefreshCw, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export default function CalendarPage() {
