@@ -1,9 +1,31 @@
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createSupabaseClient, type SupabaseClient } from '@supabase/supabase-js'
 import { createCalendarEvent, refreshAccessToken } from '@/lib/google-calendar'
 import { NextResponse } from 'next/server'
 import { addSeconds, isPast, parseISO } from 'date-fns'
 
-async function getValidAccessToken(supabase: Awaited<ReturnType<typeof createClient>>, userId: string) {
+async function getRequestClient(request: Request) {
+  const bearerToken = request.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]
+
+  if (bearerToken) {
+    const supabase = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        auth: { autoRefreshToken: false, persistSession: false },
+        global: { headers: { Authorization: `Bearer ${bearerToken}` } },
+      }
+    )
+    const { data: { user } } = await supabase.auth.getUser(bearerToken)
+    return { supabase, user }
+  }
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  return { supabase, user }
+}
+
+async function getValidAccessToken(supabase: SupabaseClient, userId: string) {
   const { data: profile } = await supabase
     .from('profiles')
     .select('google_access_token, google_refresh_token, google_token_expiry')
@@ -28,8 +50,7 @@ async function getValidAccessToken(supabase: Awaited<ReturnType<typeof createCli
 }
 
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { supabase, user } = await getRequestClient(request)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json().catch(() => ({}))
