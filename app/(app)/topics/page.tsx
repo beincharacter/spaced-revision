@@ -6,7 +6,7 @@ import type { Topic, Subject } from '@/types'
 import { scheduleRevisions } from '@/lib/spaced-repetition'
 import { getCurrentUser, getProfileRevisionIntervals } from '@/lib/data/profiles'
 import { listSubjectsByName } from '@/lib/data/subjects'
-import { listTopicsWithSubject, markTopicStudied, deleteTopic } from '@/lib/data/topics'
+import { listTopicsWithSubject, markTopicStudied, deleteTopic, deleteTopics } from '@/lib/data/topics'
 import { createRevisions } from '@/lib/data/revisions'
 import { formatDate } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -16,11 +16,11 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { TopicDialog } from '@/components/topics/topic-dialog'
+import { TopicDetailsDialog } from '@/components/topics/topic-details-dialog'
 import { BulkImportDialog } from '@/components/topics/bulk-import-dialog'
 import { StudyDateDialog } from '@/components/topics/study-date-dialog'
-import { Plus, Upload, Search, CheckCircle2, MoreVertical, Edit2, Trash2, FileText } from 'lucide-react'
-
-const difficultyColors = { easy: 'success', medium: 'warning', hard: 'destructive' } as const
+import { Checkbox } from '@/components/ui/checkbox'
+import { Plus, Upload, Search, CheckCircle2, MoreVertical, Edit2, Trash2, FileText, ListChecks, X } from 'lucide-react'
 
 export default function TopicsPage() {
   return (
@@ -45,6 +45,9 @@ function TopicsPageInner() {
   const [studyDialogTopic, setStudyDialogTopic] = useState<Topic | null>(null)
   const [studyLoading, setStudyLoading] = useState(false)
   const [userIntervals, setUserIntervals] = useState<number[] | null>(null)
+  const [detailsTopic, setDetailsTopic] = useState<Topic | null>(null)
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   const fetchData = useCallback(async () => {
     const [topicsData, subjectsData, savedIntervals] = await Promise.all([
@@ -96,6 +99,29 @@ function TopicsPageInner() {
     fetchData()
   }
 
+  function toggleSelected(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false)
+    setSelectedIds(new Set())
+  }
+
+  async function handleBulkDelete() {
+    if (selectedIds.size === 0) return
+    if (!confirm(`Delete ${selectedIds.size} topic${selectedIds.size !== 1 ? 's' : ''} and all their revisions?`)) return
+    await deleteTopics(Array.from(selectedIds))
+    toast.success(`${selectedIds.size} topic${selectedIds.size !== 1 ? 's' : ''} deleted`)
+    exitSelectMode()
+    fetchData()
+  }
+
   const filtered = topics.filter(t => {
     const matchSearch = !search || t.name.toLowerCase().includes(search.toLowerCase())
     const matchSubject = !filterSubject || t.subject_id === filterSubject
@@ -110,6 +136,15 @@ function TopicsPageInner() {
           <p className="text-slate-500 text-sm mt-0.5">{filtered.length} topic{filtered.length !== 1 ? 's' : ''}</p>
         </div>
         <div className="flex gap-2">
+          {selectMode ? (
+            <Button variant="outline" size="sm" onClick={exitSelectMode}>
+              <X className="w-3.5 h-3.5 mr-1.5" />Cancel
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" onClick={() => setSelectMode(true)}>
+              <ListChecks className="w-3.5 h-3.5 mr-1.5" />Select
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => setBulkDialogOpen(true)}>
             <Upload className="w-3.5 h-3.5 mr-1.5" />Bulk Import
           </Button>
@@ -118,6 +153,15 @@ function TopicsPageInner() {
           </Button>
         </div>
       </div>
+
+      {selectMode && selectedIds.size > 0 && (
+        <div className="sticky top-0 z-30 flex items-center justify-between bg-slate-900 text-white rounded-xl px-4 py-2.5 shadow-sm">
+          <span className="text-sm font-medium">{selectedIds.size} selected</span>
+          <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
+            <Trash2 className="w-3.5 h-3.5 mr-1.5" />Delete
+          </Button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex gap-3 flex-wrap">
@@ -165,46 +209,60 @@ function TopicsPageInner() {
           {filtered.map(topic => {
             const subject = topic.subject as Subject
             const isStudied = !!topic.first_studied_at
+            const isSelected = selectedIds.has(topic.id)
             return (
-              <Card key={topic.id} className="hover:shadow-md transition-shadow">
+              <Card
+                key={topic.id}
+                className={`hover:shadow-md transition-shadow cursor-pointer ${isSelected ? 'ring-2 ring-indigo-400' : ''}`}
+                onClick={() => selectMode ? toggleSelected(topic.id) : setDetailsTopic(topic)}
+              >
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between gap-2 mb-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-slate-900 truncate">{topic.name}</p>
-                      {subject && (
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: subject.color }} />
-                          <span className="text-xs text-slate-500 truncate">{subject.name}</span>
-                        </div>
+                    <div className="flex items-start gap-2 flex-1 min-w-0">
+                      {selectMode && (
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={() => toggleSelected(topic.id)}
+                          onClick={e => e.stopPropagation()}
+                          className="mt-0.5"
+                        />
                       )}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-slate-900 truncate">{topic.name}</p>
+                        {subject && (
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: subject.color }} />
+                            <span className="text-xs text-slate-500 truncate">{subject.name}</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon-sm">
-                          <MoreVertical className="w-3.5 h-3.5" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => { setEditTopic(topic); setTopicDialogOpen(true) }}>
-                          <Edit2 className="w-3.5 h-3.5 mr-2" />Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem className="text-rose-600" onClick={() => handleDelete(topic.id)}>
-                          <Trash2 className="w-3.5 h-3.5 mr-2" />Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    {!selectMode && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon-sm" onClick={e => e.stopPropagation()}>
+                            <MoreVertical className="w-3.5 h-3.5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => { setEditTopic(topic); setTopicDialogOpen(true) }}>
+                            <Edit2 className="w-3.5 h-3.5 mr-2" />Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem className="text-rose-600" onClick={() => handleDelete(topic.id)}>
+                            <Trash2 className="w-3.5 h-3.5 mr-2" />Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </div>
 
-                  <div className="flex items-center gap-2 mb-3 flex-wrap">
-                    <Badge variant={difficultyColors[topic.difficulty] || 'secondary'} className="capitalize text-xs">
-                      {topic.difficulty}
-                    </Badge>
-                    {isStudied && (
+                  {isStudied && (
+                    <div className="flex items-center gap-2 mb-3 flex-wrap">
                       <Badge variant="default" className="text-xs">
                         {topic.revision_count}× revised
                       </Badge>
-                    )}
-                  </div>
+                    </div>
+                  )}
 
                   {isStudied ? (
                     <div className="text-xs text-slate-400">
@@ -215,7 +273,7 @@ function TopicsPageInner() {
                       size="sm"
                       variant="success"
                       className="w-full"
-                      onClick={() => handleMarkStudied(topic)}
+                      onClick={e => { e.stopPropagation(); handleMarkStudied(topic) }}
                     >
                       <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />Mark as Studied
                     </Button>
@@ -227,6 +285,12 @@ function TopicsPageInner() {
         </div>
       )}
 
+      <TopicDetailsDialog
+        open={!!detailsTopic}
+        onClose={() => setDetailsTopic(null)}
+        topic={detailsTopic}
+        onEdit={() => { setEditTopic(detailsTopic); setDetailsTopic(null); setTopicDialogOpen(true) }}
+      />
       <TopicDialog
         open={topicDialogOpen}
         onClose={() => { setTopicDialogOpen(false); setEditTopic(null) }}

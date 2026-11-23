@@ -74,3 +74,9 @@ export async function deleteTopic(id: string) {
   const { error } = await supabase.from('topics').delete().eq('id', id)
   return { error }
 }
+
+export async function deleteTopics(ids: string[]) {
+  const supabase = createClient()
+  const { error } = await supabase.from('topics').delete().in('id', ids)
+  return { error }
+}

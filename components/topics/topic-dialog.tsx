@@ -4,10 +4,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { Topic, Subject } from '@/types'
-import { getCurrentUser } from '@/lib/data/profiles'
-import { createTopic, updateTopic } from '@/lib/data/topics'
+import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 
 interface TopicDialogProps {
@@ -22,33 +22,35 @@ interface TopicDialogProps {
 export function TopicDialog({ open, onClose, topic, subjects, defaultSubjectId, onSaved }: TopicDialogProps) {
   const [name, setName] = useState('')
   const [subjectId, setSubjectId] = useState('')
-  const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium')
+  const [subtopicsText, setSubtopicsText] = useState('')
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (topic) {
       setName(topic.name)
       setSubjectId(topic.subject_id)
-      setDifficulty(topic.difficulty)
+      setSubtopicsText((topic.subtopics || []).join('\n'))
     } else {
       setName('')
       setSubjectId(defaultSubjectId || subjects[0]?.id || '')
-      setDifficulty('medium')
+      setSubtopicsText('')
     }
   }, [topic, subjects, defaultSubjectId, open])
 
   async function handleSave() {
     if (!name.trim() || !subjectId) return
     setLoading(true)
+    const supabase = createClient()
+    const subtopics = subtopicsText.split('\n').map(s => s.trim()).filter(Boolean)
 
     if (topic) {
-      const { error } = await updateTopic(topic.id, { name: name.trim(), subject_id: subjectId, difficulty })
+      const { error } = await supabase.from('topics').update({ name: name.trim(), subject_id: subjectId, subtopics }).eq('id', topic.id)
       if (error) { toast.error('Failed to update topic'); setLoading(false); return }
       toast.success('Topic updated')
     } else {
-      const user = await getCurrentUser()
+      const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      const { error } = await createTopic({ name: name.trim(), subject_id: subjectId, difficulty, user_id: user.id })
+      const { error } = await supabase.from('topics').insert({ name: name.trim(), subject_id: subjectId, subtopics, user_id: user.id })
       if (error) { toast.error('Failed to create topic'); setLoading(false); return }
       toast.success('Topic created!')
     }
@@ -90,17 +92,14 @@ export function TopicDialog({ open, onClose, topic, subjects, defaultSubjectId, 
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label>Difficulty</Label>
-            <Select value={difficulty} onValueChange={(v) => setDifficulty(v as typeof difficulty)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="easy">Easy</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="hard">Hard</SelectItem>
-              </SelectContent>
-            </Select>
+            <Label htmlFor="topic-subtopic">Subtopics</Label>
+            <Textarea
+              id="topic-subtopic"
+              placeholder={'One subtopic per line\ne.g.\nTypes of Diabetes\nInsulin Therapy\nComplications'}
+              className="min-h-[120px]"
+              value={subtopicsText}
+              onChange={e => setSubtopicsText(e.target.value)}
+            />
           </div>
         </div>
         <DialogFooter>

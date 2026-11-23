@@ -54,3 +54,9 @@ export async function deleteSubject(id: string) {
   const { error } = await supabase.from('subjects').delete().eq('id', id)
   return { error }
 }
+
+export async function deleteSubjects(ids: string[]) {
+  const supabase = createClient()
+  const { error } = await supabase.from('subjects').delete().in('id', ids)
+  return { error }
+}
