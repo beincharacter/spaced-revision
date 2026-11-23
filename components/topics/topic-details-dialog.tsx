@@ -1,7 +1,7 @@
 'use client'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { Separator } from '@/components/ui/separator'
 import type { Topic, Subject } from '@/types'
 import { formatDate } from '@/lib/utils'
 import { Edit2 } from 'lucide-react'
@@ -21,18 +21,21 @@ export function TopicDetailsDialog({ open, onClose, topic, onEdit }: TopicDetail
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          {subject && (
-            <Badge
-              className="w-fit mb-1 text-xs text-white border-0"
-              style={{ backgroundColor: subject.color }}
-            >
-              {subject.name}
-            </Badge>
-          )}
-          <DialogTitle>{topic.name}</DialogTitle>
+        <DialogHeader className="flex-row items-center justify-between gap-3 space-y-0 text-left pr-6 -mt-2">
+          <div className="min-w-0">
+            {subject && (
+              <p className="text-base font-semibold truncate" style={{ color: subject.color }}>
+                {subject.name}
+              </p>
+            )}
+          </div>
+          <Button size="sm" variant="outline" onClick={onEdit} className="shrink-0 text-sm">
+            <Edit2 className="w-3.5 h-3.5 mr-1.5" />Edit
+          </Button>
         </DialogHeader>
+        <Separator />
         <div className="space-y-4">
+          <DialogTitle>{topic.name}</DialogTitle>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
               <p className="text-xs text-slate-400">Status</p>
@@ -55,20 +58,14 @@ export function TopicDetailsDialog({ open, onClose, topic, onEdit }: TopicDetail
           {topic.subtopics && topic.subtopics.length > 0 && (
             <div className="space-y-1.5">
               <p className="text-xs text-slate-400">Subtopics</p>
-              <div className="flex flex-wrap gap-1.5">
-                {topic.subtopics.map(s => (
-                  <Badge key={s} variant="secondary" className="text-xs">{s}</Badge>
-                ))}
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 max-h-40 overflow-y-auto">
+                <ul className="space-y-1 text-sm text-slate-700 list-disc list-inside">
+                  {topic.subtopics.map(s => <li key={s}>{s}</li>)}
+                </ul>
               </div>
             </div>
           )}
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Close</Button>
-          <Button onClick={onEdit}>
-            <Edit2 className="w-3.5 h-3.5 mr-1.5" />Edit
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

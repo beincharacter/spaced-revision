@@ -4,12 +4,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
+import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { Topic, Subject } from '@/types'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import { X } from 'lucide-react'
 
 interface TopicDialogProps {
   open: boolean
@@ -23,38 +22,26 @@ interface TopicDialogProps {
 export function TopicDialog({ open, onClose, topic, subjects, defaultSubjectId, onSaved }: TopicDialogProps) {
   const [name, setName] = useState('')
   const [subjectId, setSubjectId] = useState('')
-  const [subtopics, setSubtopics] = useState<string[]>([])
-  const [subtopicInput, setSubtopicInput] = useState('')
+  const [subtopicsText, setSubtopicsText] = useState('')
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (topic) {
       setName(topic.name)
       setSubjectId(topic.subject_id)
-      setSubtopics(topic.subtopics || [])
+      setSubtopicsText((topic.subtopics || []).join('\n'))
     } else {
       setName('')
       setSubjectId(defaultSubjectId || subjects[0]?.id || '')
-      setSubtopics([])
+      setSubtopicsText('')
     }
-    setSubtopicInput('')
   }, [topic, subjects, defaultSubjectId, open])
-
-  function addSubtopic() {
-    const value = subtopicInput.trim()
-    if (!value || subtopics.includes(value)) { setSubtopicInput(''); return }
-    setSubtopics(prev => [...prev, value])
-    setSubtopicInput('')
-  }
-
-  function removeSubtopic(value: string) {
-    setSubtopics(prev => prev.filter(s => s !== value))
-  }
 
   async function handleSave() {
     if (!name.trim() || !subjectId) return
     setLoading(true)
     const supabase = createClient()
+    const subtopics = subtopicsText.split('\n').map(s => s.trim()).filter(Boolean)
 
     if (topic) {
       const { error } = await supabase.from('topics').update({ name: name.trim(), subject_id: subjectId, subtopics }).eq('id', topic.id)
@@ -106,28 +93,13 @@ export function TopicDialog({ open, onClose, topic, subjects, defaultSubjectId, 
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="topic-subtopic">Subtopics</Label>
-            <div className="flex gap-2">
-              <Input
-                id="topic-subtopic"
-                placeholder="Add a subtopic and press Enter"
-                value={subtopicInput}
-                onChange={e => setSubtopicInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addSubtopic() } }}
-              />
-              <Button type="button" variant="outline" onClick={addSubtopic}>Add</Button>
-            </div>
-            {subtopics.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {subtopics.map(s => (
-                  <Badge key={s} variant="secondary" className="text-xs gap-1 pr-1">
-                    {s}
-                    <button type="button" onClick={() => removeSubtopic(s)} className="hover:text-rose-600">
-                      <X className="w-3 h-3" />
-                    </button>
-                  </Badge>
-                ))}
-              </div>
-            )}
+            <Textarea
+              id="topic-subtopic"
+              placeholder={'One subtopic per line\ne.g.\nTypes of Diabetes\nInsulin Therapy\nComplications'}
+              className="min-h-[120px]"
+              value={subtopicsText}
+              onChange={e => setSubtopicsText(e.target.value)}
+            />
           </div>
         </div>
         <DialogFooter>
