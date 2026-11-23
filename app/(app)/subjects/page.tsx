@@ -171,10 +171,10 @@ export default function SubjectsPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => { setEditSubject(s); setDialogOpen(true) }}>
+                          <DropdownMenuItem onClick={e => { e.stopPropagation(); setEditSubject(s); setDialogOpen(true) }}>
                             <Edit2 className="w-3.5 h-3.5 mr-2" />Edit
                           </DropdownMenuItem>
-                          <DropdownMenuItem className="text-rose-600" onClick={() => handleDelete(s.id)}>
+                          <DropdownMenuItem className="text-rose-600" onClick={e => { e.stopPropagation(); handleDelete(s.id) }}>
                             <Trash2 className="w-3.5 h-3.5 mr-2" />Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>

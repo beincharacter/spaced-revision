@@ -249,10 +249,10 @@ function TopicsPageInner() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => { setEditTopic(topic); setTopicDialogOpen(true) }}>
+                          <DropdownMenuItem onClick={e => { e.stopPropagation(); setEditTopic(topic); setTopicDialogOpen(true) }}>
                             <Edit2 className="w-3.5 h-3.5 mr-2" />Edit
                           </DropdownMenuItem>
-                          <DropdownMenuItem className="text-rose-600" onClick={() => handleDelete(topic.id)}>
+                          <DropdownMenuItem className="text-rose-600" onClick={e => { e.stopPropagation(); handleDelete(topic.id) }}>
                             <Trash2 className="w-3.5 h-3.5 mr-2" />Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>
