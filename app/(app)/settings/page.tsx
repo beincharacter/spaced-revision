@@ -10,11 +10,12 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
-import { EXAM_TEMPLATES, REVISION_INTERVALS } from '@/types'
+import { EXAM_TEMPLATES, REVISION_INTERVALS, SUBJECT_COLORS } from '@/types'
 import { User, Target, AlertTriangle, Save, Calendar, CheckCircle2, RefreshCw, Unlink, Repeat2 } from 'lucide-react'
 import { Suspense } from 'react'
 import { RevisionCycleEditor } from '@/components/settings/revision-cycle-editor'
 import { SyncDialog } from '@/components/calendar/sync-dialog'
+import { ExamSubjectsDialog } from '@/components/settings/exam-subjects-dialog'
 
 function SettingsPageInner() {
   const searchParams = useSearchParams()
@@ -23,10 +24,13 @@ function SettingsPageInner() {
     google_refresh_token?: string | null
   }>({})
   const [intervals, setIntervals] = useState<number[]>(REVISION_INTERVALS)
+  const [isCustomExam, setIsCustomExam] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [syncDialogOpen, setSyncDialogOpen] = useState(false)
+  const [examSubjectsCandidates, setExamSubjectsCandidates] = useState<string[]>([])
+  const [addingSubjects, setAddingSubjects] = useState(false)
 
   useEffect(() => {
     const gcalParam = searchParams.get('gcal')
@@ -49,6 +53,7 @@ function SettingsPageInner() {
       const { data } = await supabase.from('profiles').select('*').single()
       if (data) {
         setProfile(data as typeof profile)
+        setIsCustomExam(!!(data as Partial<Profile>).exam_name && !((data as Partial<Profile>).exam_name! in EXAM_TEMPLATES))
         // Load saved custom intervals, fall back to default
         const saved = (data as { revision_intervals?: number[] }).revision_intervals
         if (saved?.length) setIntervals(saved)
@@ -70,9 +75,38 @@ function SettingsPageInner() {
       target_exam_date: profile.target_exam_date || null,
       revision_intervals: intervals,
     }).eq('id', user?.id || '')
+
+    if (!error && user && profile.exam_name && EXAM_TEMPLATES[profile.exam_name]) {
+      const { data: existing } = await supabase.from('subjects').select('name').eq('user_id', user.id)
+      const existingNames = new Set((existing || []).map(s => s.name.toLowerCase()))
+      const candidates = EXAM_TEMPLATES[profile.exam_name].subjects.filter(
+        name => !existingNames.has(name.toLowerCase())
+      )
+      if (candidates.length) setExamSubjectsCandidates(candidates)
+    }
+
     setSaving(false)
     if (error) toast.error('Failed to save settings')
     else toast.success('Settings saved!')
+  }
+
+  async function handleAddExamSubjects(selected: string[]) {
+    if (!selected.length) { setExamSubjectsCandidates([]); return }
+    setAddingSubjects(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setAddingSubjects(false); return }
+    const { error } = await supabase.from('subjects').insert(
+      selected.map((name, i) => ({
+        name,
+        color: SUBJECT_COLORS[i % SUBJECT_COLORS.length],
+        user_id: user.id,
+      }))
+    )
+    setAddingSubjects(false)
+    setExamSubjectsCandidates([])
+    if (error) toast.error('Failed to add subjects')
+    else toast.success('Subjects added!')
   }
 
   function handleConnectCalendar() {
@@ -177,7 +211,18 @@ function SettingsPageInner() {
         <CardContent className="space-y-4">
           <div className="space-y-1.5">
             <Label>Exam</Label>
-            <Select value={profile.exam_name || ''} onValueChange={v => setProfile(p => ({ ...p, exam_name: v }))}>
+            <Select
+              value={isCustomExam ? 'Other' : (profile.exam_name || '')}
+              onValueChange={v => {
+                if (v === 'Other') {
+                  setIsCustomExam(true)
+                  setProfile(p => ({ ...p, exam_name: '' }))
+                } else {
+                  setIsCustomExam(false)
+                  setProfile(p => ({ ...p, exam_name: v }))
+                }
+              }}
+            >
               <SelectTrigger><SelectValue placeholder="Select exam" /></SelectTrigger>
               <SelectContent>
                 {Object.keys(EXAM_TEMPLATES).map(e => <SelectItem key={e} value={e}>{e}</SelectItem>)}
@@ -185,10 +230,11 @@ function SettingsPageInner() {
               </SelectContent>
             </Select>
           </div>
-          {profile.exam_name === 'Other' && (
+          {isCustomExam && (
             <div className="space-y-1.5">
               <Label htmlFor="custom-exam">Custom Exam Name</Label>
               <Input id="custom-exam" placeholder="e.g. CA Final, Bar Exam..."
+                value={profile.exam_name || ''}
                 onChange={e => setProfile(p => ({ ...p, exam_name: e.target.value }))} />
             </div>
           )}
@@ -302,6 +348,15 @@ function SettingsPageInner() {
         onClose={() => setSyncDialogOpen(false)}
         onSync={handleSync}
         loading={syncing}
+      />
+
+      <ExamSubjectsDialog
+        open={examSubjectsCandidates.length > 0}
+        examName={profile.exam_name || ''}
+        subjects={examSubjectsCandidates}
+        onClose={() => setExamSubjectsCandidates([])}
+        onConfirm={handleAddExamSubjects}
+        loading={addingSubjects}
       />
     </div>
   )

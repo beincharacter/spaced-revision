@@ -106,6 +106,9 @@ export const EXAM_TEMPLATES: Record<string, { subjects: string[] }> = {
   'NEET PG': {
     subjects: ['Medicine', 'Surgery', 'Pharmacology', 'Pathology', 'Anatomy', 'Physiology', 'Biochemistry', 'Pediatrics', 'OBG', 'Radiology', 'Ophthalmology', 'ENT', 'Orthopedics', 'PSM'],
   },
+  'INICET': {
+    subjects: ['Medicine', 'Surgery', 'Pharmacology', 'Pathology', 'Anatomy', 'Physiology', 'Biochemistry', 'Pediatrics', 'OBG', 'Radiology', 'Ophthalmology', 'ENT', 'Orthopedics', 'PSM'],
+  },
   'NEET UG': {
     subjects: ['Physics', 'Chemistry', 'Biology', 'Botany', 'Zoology'],
   },
