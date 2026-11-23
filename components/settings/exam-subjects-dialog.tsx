@@ -27,6 +27,12 @@ export function ExamSubjectsDialog({ open, examName, subjects, onClose, onConfir
     })
   }
 
+  const allSelected = selected.size === subjects.length
+
+  function toggleAll() {
+    setSelected(allSelected ? new Set() : new Set(subjects))
+  }
+
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="sm:max-w-sm">
@@ -37,6 +43,12 @@ export function ExamSubjectsDialog({ open, examName, subjects, onClose, onConfir
           </DialogTitle>
           <DialogDescription>Choose which subjects to add to your list</DialogDescription>
         </DialogHeader>
+
+        <div className="flex items-center justify-end">
+          <Button variant="ghost" size="sm" className="h-auto py-1 px-2 text-xs text-slate-500" onClick={toggleAll}>
+            {allSelected ? 'Deselect All' : 'Select All'}
+          </Button>
+        </div>
 
         <div className="space-y-2 max-h-72 overflow-y-auto">
           {subjects.map(name => (
