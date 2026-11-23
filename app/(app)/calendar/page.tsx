@@ -11,9 +11,13 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { SyncDialog } from '@/components/calendar/sync-dialog'
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { Revision } from '@/types'
 import { ChevronLeft, ChevronRight, CalendarDays, RefreshCw, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 export default function CalendarPage() {
   const [currentMonth, setCurrentMonth] = useState(new Date())
@@ -25,6 +29,24 @@ export default function CalendarPage() {
   const [syncing, setSyncing] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [pendingUnsyncedCount, setPendingUnsyncedCount] = useState(0)
+  const [accountCreatedAt, setAccountCreatedAt] = useState<Date | null>(null)
+  const [maxRevisionDate, setMaxRevisionDate] = useState<Date | null>(null)
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false)
+  const [pickerYear, setPickerYear] = useState(new Date().getFullYear())
+
+  useEffect(() => {
+    async function fetchMaxRevisionDate() {
+      const supabase = createClient()
+      const { data } = await supabase
+        .from('revisions')
+        .select('scheduled_date')
+        .order('scheduled_date', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (data?.scheduled_date) setMaxRevisionDate(new Date(data.scheduled_date))
+    }
+    fetchMaxRevisionDate()
+  }, [])
 
   const fetchRevisions = useCallback(async () => {
     const supabase = createClient()
@@ -38,12 +60,14 @@ export default function CalendarPage() {
         .gte('scheduled_date', start)
         .lte('scheduled_date', end)
         .order('scheduled_date'),
-      supabase.from('profiles').select('google_access_token').single(),
+      supabase.from('profiles').select('google_access_token, created_at').single(),
     ])
 
     if (data) setRevisions(data as unknown as Revision[])
     const connected = !!(profile as { google_access_token?: string })?.google_access_token
     setCalendarConnected(connected)
+    const createdAt = (profile as { created_at?: string })?.created_at
+    if (createdAt) setAccountCreatedAt(new Date(createdAt))
 
     if (connected) {
       const { count } = await supabase
@@ -119,6 +143,24 @@ export default function CalendarPage() {
     : []
 
   const today = format(new Date(), 'yyyy-MM-dd')
+  const now = new Date()
+  const currentActualYear = now.getFullYear()
+  const accountCreatedYear = accountCreatedAt ? accountCreatedAt.getFullYear() : currentActualYear
+  const maxAllowedDate = maxRevisionDate && maxRevisionDate > now
+    ? new Date(maxRevisionDate.getFullYear(), maxRevisionDate.getMonth(), 1)
+    : new Date(currentActualYear, now.getMonth(), 1)
+  const maxAllowedYear = Math.max(currentActualYear, maxAllowedDate.getFullYear())
+  const showYearSelect = accountCreatedYear !== maxAllowedYear
+  const years: number[] = []
+  for (let y = maxAllowedYear; y >= accountCreatedYear; y--) years.push(y)
+
+  function isMonthDisabled(year: number, monthIdx: number) {
+    const monthDate = new Date(year, monthIdx, 1)
+    const minDate = accountCreatedAt
+      ? new Date(accountCreatedAt.getFullYear(), accountCreatedAt.getMonth(), 1)
+      : maxAllowedDate
+    return monthDate > maxAllowedDate || monthDate < minDate
+  }
 
   return (
     <div className="space-y-6">
@@ -134,13 +176,61 @@ export default function CalendarPage() {
               Sync{pendingUnsyncedCount > 0 ? ` (${pendingUnsyncedCount} pending)` : ''}
             </Button>
           )}
-          <Button variant="outline" size="icon-sm" onClick={() => setCurrentMonth(m => subMonths(m, 1))}>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            onClick={() => setCurrentMonth(m => subMonths(m, 1))}
+            disabled={isMonthDisabled(subMonths(currentMonth, 1).getFullYear(), subMonths(currentMonth, 1).getMonth())}
+          >
             <ChevronLeft className="w-4 h-4" />
           </Button>
-          <span className="text-sm font-semibold text-slate-700 w-32 text-center">
-            {format(currentMonth, 'MMMM yyyy')}
-          </span>
-          <Button variant="outline" size="icon-sm" onClick={() => setCurrentMonth(m => addMonths(m, 1))}>
+          <Popover open={monthPickerOpen} onOpenChange={v => { setMonthPickerOpen(v); if (v) setPickerYear(currentMonth.getFullYear()) }}>
+            <PopoverTrigger asChild>
+              <button className="text-sm font-semibold text-slate-700 w-32 text-center hover:text-indigo-600 transition-colors">
+                {format(currentMonth, 'MMMM yyyy')}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-64" align="center">
+              {showYearSelect && (
+                <Select value={String(pickerYear)} onValueChange={v => setPickerYear(Number(v))}>
+                  <SelectTrigger className="mb-3"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {years.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )}
+              <div className="grid grid-cols-3 gap-1.5">
+                {MONTH_NAMES.map((name, idx) => {
+                  const disabled = isMonthDisabled(pickerYear, idx)
+                  const active = pickerYear === currentMonth.getFullYear() && idx === currentMonth.getMonth()
+                  return (
+                    <button
+                      key={name}
+                      disabled={disabled}
+                      onClick={() => {
+                        setCurrentMonth(new Date(pickerYear, idx, 1))
+                        setMonthPickerOpen(false)
+                      }}
+                      className={cn(
+                        'text-xs font-medium rounded-md py-1.5 transition-colors',
+                        disabled && 'opacity-30 cursor-not-allowed',
+                        !disabled && active && 'bg-indigo-600 text-white',
+                        !disabled && !active && 'hover:bg-slate-100 text-slate-700',
+                      )}
+                    >
+                      {name}
+                    </button>
+                  )
+                })}
+              </div>
+            </PopoverContent>
+          </Popover>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            onClick={() => setCurrentMonth(m => addMonths(m, 1))}
+            disabled={isMonthDisabled(addMonths(currentMonth, 1).getFullYear(), addMonths(currentMonth, 1).getMonth())}
+          >
             <ChevronRight className="w-4 h-4" />
           </Button>
         </div>
