@@ -4,10 +4,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { Topic, Subject } from '@/types'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
+import { X } from 'lucide-react'
 
 interface TopicDialogProps {
   open: boolean
@@ -21,20 +23,33 @@ interface TopicDialogProps {
 export function TopicDialog({ open, onClose, topic, subjects, defaultSubjectId, onSaved }: TopicDialogProps) {
   const [name, setName] = useState('')
   const [subjectId, setSubjectId] = useState('')
-  const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium')
+  const [subtopics, setSubtopics] = useState<string[]>([])
+  const [subtopicInput, setSubtopicInput] = useState('')
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (topic) {
       setName(topic.name)
       setSubjectId(topic.subject_id)
-      setDifficulty(topic.difficulty)
+      setSubtopics(topic.subtopics || [])
     } else {
       setName('')
       setSubjectId(defaultSubjectId || subjects[0]?.id || '')
-      setDifficulty('medium')
+      setSubtopics([])
     }
+    setSubtopicInput('')
   }, [topic, subjects, defaultSubjectId, open])
+
+  function addSubtopic() {
+    const value = subtopicInput.trim()
+    if (!value || subtopics.includes(value)) { setSubtopicInput(''); return }
+    setSubtopics(prev => [...prev, value])
+    setSubtopicInput('')
+  }
+
+  function removeSubtopic(value: string) {
+    setSubtopics(prev => prev.filter(s => s !== value))
+  }
 
   async function handleSave() {
     if (!name.trim() || !subjectId) return
@@ -42,13 +57,13 @@ export function TopicDialog({ open, onClose, topic, subjects, defaultSubjectId, 
     const supabase = createClient()
 
     if (topic) {
-      const { error } = await supabase.from('topics').update({ name: name.trim(), subject_id: subjectId, difficulty }).eq('id', topic.id)
+      const { error } = await supabase.from('topics').update({ name: name.trim(), subject_id: subjectId, subtopics }).eq('id', topic.id)
       if (error) { toast.error('Failed to update topic'); setLoading(false); return }
       toast.success('Topic updated')
     } else {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      const { error } = await supabase.from('topics').insert({ name: name.trim(), subject_id: subjectId, difficulty, user_id: user.id })
+      const { error } = await supabase.from('topics').insert({ name: name.trim(), subject_id: subjectId, subtopics, user_id: user.id })
       if (error) { toast.error('Failed to create topic'); setLoading(false); return }
       toast.success('Topic created!')
     }
@@ -90,17 +105,29 @@ export function TopicDialog({ open, onClose, topic, subjects, defaultSubjectId, 
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label>Difficulty</Label>
-            <Select value={difficulty} onValueChange={(v) => setDifficulty(v as typeof difficulty)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="easy">Easy</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="hard">Hard</SelectItem>
-              </SelectContent>
-            </Select>
+            <Label htmlFor="topic-subtopic">Subtopics</Label>
+            <div className="flex gap-2">
+              <Input
+                id="topic-subtopic"
+                placeholder="Add a subtopic and press Enter"
+                value={subtopicInput}
+                onChange={e => setSubtopicInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addSubtopic() } }}
+              />
+              <Button type="button" variant="outline" onClick={addSubtopic}>Add</Button>
+            </div>
+            {subtopics.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {subtopics.map(s => (
+                  <Badge key={s} variant="secondary" className="text-xs gap-1 pr-1">
+                    {s}
+                    <button type="button" onClick={() => removeSubtopic(s)} className="hover:text-rose-600">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
           </div>
         </div>
         <DialogFooter>

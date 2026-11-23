@@ -31,6 +31,7 @@ export default function DashboardPage() {
   const [syncing, setSyncing] = useState(false)
   const [calendarConnected, setCalendarConnected] = useState(false)
   const [syncDialogOpen, setSyncDialogOpen] = useState(false)
+  const [inboxTab, setInboxTab] = useState('today')
 
   const today = getTodayString()
   const upcomingEnd = addDaysToToday(7)
@@ -149,8 +150,6 @@ export default function DashboardPage() {
     return 'Good evening'
   }
 
-  const totalDue = dueToday.length + overdue.length
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -180,14 +179,19 @@ export default function DashboardPage() {
       {/* Stats strip */}
       <div className="grid grid-cols-3 gap-3">
         {[
-          { label: 'Due Today', value: dueToday.length, color: 'text-amber-600', bg: 'bg-amber-50' },
-          { label: 'Overdue', value: overdue.length, color: 'text-rose-600', bg: 'bg-rose-50' },
-          { label: 'Est. Time', value: `${Math.round(totalDue * 1.5)} min`, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-        ].map(({ label, value, color, bg }) => (
-          <div key={label} className={`${bg} rounded-xl p-4 text-center`}>
+          { label: 'Due Today', value: dueToday.length, color: 'text-amber-600', bg: 'bg-amber-50', tab: 'today' },
+          { label: 'Overdue', value: overdue.length, color: 'text-rose-600', bg: 'bg-rose-50', tab: 'overdue' },
+          { label: 'Upcoming', value: upcoming.length, color: 'text-indigo-600', bg: 'bg-indigo-50', tab: 'upcoming' },
+        ].map(({ label, value, color, bg, tab }) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => setInboxTab(tab)}
+            className={`${bg} rounded-xl p-4 text-center transition-transform hover:scale-[1.02] active:scale-[0.98] ${inboxTab === tab ? 'ring-2 ring-offset-2 ring-slate-300' : ''}`}
+          >
             <p className={`text-2xl font-bold ${color}`}>{value}</p>
             <p className="text-xs text-slate-500 mt-0.5">{label}</p>
-          </div>
+          </button>
         ))}
       </div>
 
@@ -202,7 +206,7 @@ export default function DashboardPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <Tabs defaultValue="today">
+              <Tabs value={inboxTab} onValueChange={setInboxTab}>
                 <TabsList className="w-full mb-4">
                   <TabsTrigger value="today" className="flex-1">
                     Due Today {dueToday.length > 0 && <span className="ml-1.5 bg-amber-500 text-white text-xs rounded-full w-4 h-4 inline-flex items-center justify-center">{dueToday.length}</span>}

@@ -30,6 +30,7 @@ export interface Topic {
   subject_id: string
   name: string
   difficulty: Difficulty
+  subtopics: string[] | null
   first_studied_at: string | null
   last_revised_at: string | null
   revision_count: number
