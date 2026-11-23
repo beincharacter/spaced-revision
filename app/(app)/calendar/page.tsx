@@ -1,7 +1,8 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { getProfileCalendarInfo } from '@/lib/data/profiles'
+import { getProfileCalendarInfo, getCurrentUser } from '@/lib/data/profiles'
 import { getRevisionsInRange, getUnsyncedPendingCount, getMaxScheduledDate } from '@/lib/data/revisions'
+import { listEventsInRange, createEvent, updateEvent, getUnsyncedEventsCount } from '@/lib/data/events'
 import {
   format, startOfMonth, endOfMonth, eachDayOfInterval,
   startOfWeek, endOfWeek, isSameMonth, isToday, isSameDay,
@@ -12,10 +13,11 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { SyncDialog } from '@/components/calendar/sync-dialog'
+import { EventDialog } from '@/components/calendar/event-dialog'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import type { Revision } from '@/types'
-import { ChevronLeft, ChevronRight, CalendarDays, RefreshCw, Trash2 } from 'lucide-react'
+import type { Revision, CustomEvent } from '@/types'
+import { ChevronLeft, ChevronRight, CalendarDays, RefreshCw, Trash2, Plus, Pin, Edit2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -34,6 +36,11 @@ export default function CalendarPage() {
   const [maxRevisionDate, setMaxRevisionDate] = useState<Date | null>(null)
   const [monthPickerOpen, setMonthPickerOpen] = useState(false)
   const [pickerYear, setPickerYear] = useState(new Date().getFullYear())
+  const [events, setEvents] = useState<CustomEvent[]>([])
+  const [eventDialogOpen, setEventDialogOpen] = useState(false)
+  const [editingEvent, setEditingEvent] = useState<CustomEvent | null>(null)
+  const [savingEvent, setSavingEvent] = useState(false)
+  const [deletingEventId, setDeletingEventId] = useState<string | null>(null)
 
   useEffect(() => {
     async function fetchMaxRevisionDate() {
@@ -47,18 +54,24 @@ export default function CalendarPage() {
     const start = format(startOfMonth(currentMonth), 'yyyy-MM-dd')
     const end = format(endOfMonth(currentMonth), 'yyyy-MM-dd')
 
-    const [data, profile] = await Promise.all([
+    const [data, profile, eventsData] = await Promise.all([
       getRevisionsInRange(start, end),
       getProfileCalendarInfo(),
+      listEventsInRange(start, end),
     ])
 
     setRevisions(data as unknown as Revision[])
+    setEvents(eventsData)
     const connected = !!profile?.google_access_token
     setCalendarConnected(connected)
     if (profile?.created_at) setAccountCreatedAt(new Date(profile.created_at))
 
     if (connected) {
-      setPendingUnsyncedCount(await getUnsyncedPendingCount())
+      const [revCount, eventCount] = await Promise.all([
+        getUnsyncedPendingCount(),
+        getUnsyncedEventsCount(),
+      ])
+      setPendingUnsyncedCount(revCount + eventCount)
     }
 
     setLoading(false)
@@ -109,6 +122,58 @@ export default function CalendarPage() {
     }
   }
 
+  async function handleSaveEvent(input: { title: string; event_date: string; notes: string }) {
+    setSavingEvent(true)
+    if (editingEvent) {
+      const { error } = await updateEvent(editingEvent.id, {
+        title: input.title,
+        event_date: input.event_date,
+        notes: input.notes || null,
+      })
+      setSavingEvent(false)
+      if (error) { toast.error('Failed to update event'); return }
+      toast.success('Event updated')
+    } else {
+      const user = await getCurrentUser()
+      if (!user) { setSavingEvent(false); return }
+      const { error } = await createEvent({
+        title: input.title,
+        event_date: input.event_date,
+        notes: input.notes || null,
+        user_id: user.id,
+      })
+      setSavingEvent(false)
+      if (error) { toast.error('Failed to add event'); return }
+      toast.success('Event added')
+    }
+    setEventDialogOpen(false)
+    setEditingEvent(null)
+    fetchRevisions()
+  }
+
+  async function handleDeleteEvent(event: CustomEvent) {
+    setDeletingEventId(event.id)
+    try {
+      const res = await fetch('/api/calendar/delete-event', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId: event.id }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success(
+        event.google_event_id
+          ? 'Deleted from ReviseFlow and Google Calendar'
+          : 'Event deleted'
+      )
+      fetchRevisions()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Delete failed')
+    } finally {
+      setDeletingEventId(null)
+    }
+  }
+
   const monthStart = startOfMonth(currentMonth)
   const monthEnd = endOfMonth(currentMonth)
   const calStart = startOfWeek(monthStart, { weekStartsOn: 1 })
@@ -121,8 +186,17 @@ export default function CalendarPage() {
     revsByDate[r.scheduled_date].push(r)
   })
 
+  const eventsByDate: Record<string, CustomEvent[]> = {}
+  events.forEach(e => {
+    if (!eventsByDate[e.event_date]) eventsByDate[e.event_date] = []
+    eventsByDate[e.event_date].push(e)
+  })
+
   const selectedRevisions = selectedDay
     ? revisions.filter(r => r.scheduled_date === format(selectedDay, 'yyyy-MM-dd'))
+    : []
+  const selectedEvents = selectedDay
+    ? events.filter(e => e.event_date === format(selectedDay, 'yyyy-MM-dd'))
     : []
 
   const today = format(new Date(), 'yyyy-MM-dd')
@@ -153,6 +227,10 @@ export default function CalendarPage() {
           <p className="text-slate-500 text-sm mt-0.5">{revisions.length} revisions this month</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={() => { setEditingEvent(null); setEventDialogOpen(true) }}>
+            <Plus className="w-3.5 h-3.5 mr-1.5" />
+            Add Event
+          </Button>
           {calendarConnected && (
             <Button variant="outline" size="sm" onClick={() => setSyncDialogOpen(true)}>
               <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
@@ -233,6 +311,7 @@ export default function CalendarPage() {
                 {days.map(day => {
                   const dateStr = format(day, 'yyyy-MM-dd')
                   const dayRevs = revsByDate[dateStr] || []
+                  const dayEvents = eventsByDate[dateStr] || []
                   const isCurrentDay = isToday(day)
                   const inMonth = isSameMonth(day, currentMonth)
                   const selected = selectedDay && isSameDay(day, selectedDay)
@@ -263,8 +342,14 @@ export default function CalendarPage() {
                         </div>
                       )}
                       {done > 0 && (
-                        <div className="text-[10px] font-semibold bg-emerald-100 text-emerald-700 rounded px-1 py-0.5">
+                        <div className="text-[10px] font-semibold bg-emerald-100 text-emerald-700 rounded px-1 py-0.5 mb-0.5">
                           {done}✓
+                        </div>
+                      )}
+                      {dayEvents.length > 0 && (
+                        <div className="text-[10px] font-semibold bg-violet-100 text-violet-700 rounded px-1 py-0.5 flex items-center gap-0.5 truncate">
+                          <Pin className="w-2 h-2 shrink-0" />
+                          <span className="truncate">{dayEvents.length > 1 ? `${dayEvents.length} events` : dayEvents[0].title}</span>
                         </div>
                       )}
                     </button>
@@ -284,12 +369,57 @@ export default function CalendarPage() {
                 {selectedDay ? format(selectedDay, 'MMMM d, yyyy') : 'Select a day'}
               </CardTitle>
             </CardHeader>
-            <CardContent className="pt-0">
+            <CardContent className="pt-0 space-y-3">
               {!selectedDay ? (
                 <p className="text-sm text-slate-400">Click a day to see revisions</p>
-              ) : selectedRevisions.length === 0 ? (
-                <p className="text-sm text-slate-400">No revisions on this day</p>
               ) : (
+                <>
+                  {selectedEvents.length > 0 && (
+                    <div className="space-y-2">
+                      {selectedEvents.map(e => {
+                        const isDeleting = deletingEventId === e.id
+                        return (
+                          <div
+                            key={e.id}
+                            className={cn(
+                              'flex items-start gap-2 p-2 rounded-lg border text-sm bg-violet-50 border-violet-200 transition-opacity',
+                              isDeleting && 'opacity-50'
+                            )}
+                          >
+                            <Pin className="w-3.5 h-3.5 mt-0.5 shrink-0 text-violet-500" />
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-slate-800 truncate">{e.title}</p>
+                              {e.notes && <p className="text-xs text-slate-500 mt-0.5">{e.notes}</p>}
+                              {e.google_event_id && (
+                                <span className="text-[10px] text-indigo-500 font-medium flex items-center gap-0.5 mt-0.5">
+                                  📅 synced
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => { setEditingEvent(e); setEventDialogOpen(true) }}
+                              title="Edit event"
+                              className="shrink-0 p-1 rounded text-slate-300 hover:text-indigo-500 hover:bg-indigo-50 transition-colors"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteEvent(e)}
+                              disabled={isDeleting}
+                              title="Delete event"
+                              className="shrink-0 p-1 rounded text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {selectedRevisions.length === 0 ? (
+                    selectedEvents.length === 0 && <p className="text-sm text-slate-400">No revisions on this day</p>
+                  ) : (
                 <div className="space-y-2">
                   {selectedRevisions.map(r => {
                     const topic = r.topic
@@ -334,6 +464,8 @@ export default function CalendarPage() {
                     )
                   })}
                 </div>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -346,6 +478,14 @@ export default function CalendarPage() {
         onSync={handleSync}
         loading={syncing}
         pendingCount={pendingUnsyncedCount}
+      />
+      <EventDialog
+        open={eventDialogOpen}
+        onClose={() => { setEventDialogOpen(false); setEditingEvent(null) }}
+        defaultDate={selectedDay || new Date()}
+        event={editingEvent}
+        onSave={handleSaveEvent}
+        loading={savingEvent}
       />
     </div>
   )
