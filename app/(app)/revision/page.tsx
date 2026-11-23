@@ -95,7 +95,7 @@ function RevisionHistory({ refreshKey }: { refreshKey: number }) {
       supabase
         .from('revisions')
         .select('*, topic:topics(name, revision_count, last_revised_at, subject:subjects(id, name, color))')
-        .order('scheduled_date', { ascending: false })
+        .order('scheduled_date', { ascending: true })
         .limit(500),
       supabase.from('subjects').select('id, name, color').order('name'),
     ])
