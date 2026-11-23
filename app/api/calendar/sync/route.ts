@@ -73,14 +73,10 @@ export async function POST(request: Request) {
     .order('scheduled_date')
     .limit(250)
 
-  if (!revisions || revisions.length === 0) {
-    return NextResponse.json({ synced: 0, message: 'All revisions are already synced' })
-  }
-
   let synced = 0
   let failed = 0
 
-  for (const rev of revisions) {
+  for (const rev of revisions || []) {
     const topicName = (rev.topic as { name: string })?.name || 'Unknown Topic'
     const subjectName = (rev.topic as { subject?: { name: string } })?.subject?.name
 
@@ -105,10 +101,41 @@ export async function POST(request: Request) {
     }
   }
 
+  const { data: events } = await supabase
+    .from('events')
+    .select('*')
+    .eq('user_id', user.id)
+    .is('google_event_id', null)
+    .order('event_date')
+    .limit(250)
+
+  let eventsSynced = 0
+  let eventsFailed = 0
+
+  for (const evt of events || []) {
+    const created = await createCalendarEvent(accessToken, {
+      title: evt.title,
+      date: evt.event_date,
+      description: evt.notes || '',
+      reminderMinutes,
+      timeZone,
+    })
+
+    if (created.id) {
+      await supabase.from('events').update({ google_event_id: created.id }).eq('id', evt.id)
+      eventsSynced++
+    } else {
+      eventsFailed++
+    }
+  }
+
+  const totalSynced = synced + eventsSynced
+  const totalFailed = failed + eventsFailed
+
   return NextResponse.json({
-    synced,
-    failed,
-    message: `${synced} revision${synced !== 1 ? 's' : ''} synced to Google Calendar`,
+    synced: totalSynced,
+    failed: totalFailed,
+    message: `${totalSynced} item${totalSynced !== 1 ? 's' : ''} synced to Google Calendar`,
   })
 }
 

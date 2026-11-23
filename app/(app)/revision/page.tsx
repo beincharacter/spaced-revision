@@ -1,6 +1,5 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { format, parseISO } from 'date-fns'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -11,6 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { Revision, Subject } from '@/types'
 import { getSkipDate, getNeedsPracticeDate } from '@/lib/spaced-repetition'
 import { getTodayString, formatDate } from '@/lib/utils'
+import { listSubjectsByName } from '@/lib/data/subjects'
+import { updateTopicAfterRevision } from '@/lib/data/topics'
+import { listRevisionHistory, markRevisionComplete, getSessionQueue, createRevision, rescheduleRevision } from '@/lib/data/revisions'
 import {
   CheckCircle2, AlertTriangle, SkipForward, Brain,
   PartyPopper, Clock, Search, ListChecks,
@@ -90,17 +92,12 @@ function RevisionHistory({ refreshKey }: { refreshKey: number }) {
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
-    const supabase = createClient()
-    const [{ data: revs }, { data: subs }] = await Promise.all([
-      supabase
-        .from('revisions')
-        .select('*, topic:topics(name, revision_count, last_revised_at, subject:subjects(id, name, color))')
-        .order('scheduled_date', { ascending: true })
-        .limit(500),
-      supabase.from('subjects').select('id, name, color').order('name'),
+    const [revs, subs] = await Promise.all([
+      listRevisionHistory(),
+      listSubjectsByName(),
     ])
-    if (revs) setAll(revs as unknown as Revision[])
-    if (subs) setSubjects(subs as Subject[])
+    setAll(revs)
+    setSubjects(subs)
     setLoading(false)
   }, [])
 
@@ -108,16 +105,11 @@ function RevisionHistory({ refreshKey }: { refreshKey: number }) {
   useEffect(() => { fetchAll() }, [fetchAll, refreshKey])
 
   async function markComplete(rev: Revision) {
-    const supabase = createClient()
-    await supabase.from('revisions').update({
-      status: 'completed',
-      outcome: 'well',
-      completed_at: new Date().toISOString(),
-    }).eq('id', rev.id)
-    await supabase.from('topics').update({
+    await markRevisionComplete(rev.id, 'well')
+    await updateTopicAfterRevision(rev.topic_id, {
       last_revised_at: new Date().toISOString(),
       revision_count: (rev.topic?.revision_count || 0) + 1,
-    }).eq('id', rev.topic_id)
+    })
     toast.success('Marked as completed')
     fetchAll()
   }
@@ -302,17 +294,10 @@ function RevisionSession({ onComplete }: { onComplete: () => void }) {
 
   const fetchRevisions = useCallback(async () => {
     setLoading(true)
-    const supabase = createClient()
-    const { data } = await supabase
-      .from('revisions')
-      .select('*, topic:topics(*, subject:subjects(*))')
-      .lte('scheduled_date', today)
-      .eq('status', 'pending')
-      .order('scheduled_date')
-      .limit(50)
+    const data = await getSessionQueue(today, 50)
 
-    if (data && data.length > 0) {
-      setRevisions(data as unknown as Revision[])
+    if (data.length > 0) {
+      setRevisions(data)
       setTotal(data.length)
       setIndex(0)
       setDone(false)
@@ -334,29 +319,19 @@ function RevisionSession({ onComplete }: { onComplete: () => void }) {
 
   async function handleComplete() {
     if (!current) return
-    const supabase = createClient()
-    await supabase.from('revisions').update({
-      status: 'completed',
-      outcome: 'well',
-      completed_at: new Date().toISOString(),
-    }).eq('id', current.id)
-    await supabase.from('topics').update({
+    await markRevisionComplete(current.id, 'well')
+    await updateTopicAfterRevision(current.topic_id, {
       last_revised_at: new Date().toISOString(),
       revision_count: (current.topic?.revision_count || 0) + 1,
-    }).eq('id', current.topic_id)
+    })
     toast.success('Revised well — marked as completed!')
     advance()
   }
 
   async function handleNeedsPractice() {
     if (!current) return
-    const supabase = createClient()
-    await supabase.from('revisions').update({
-      status: 'completed',
-      outcome: 'needs_practice',
-      completed_at: new Date().toISOString(),
-    }).eq('id', current.id)
-    await supabase.from('revisions').insert({
+    await markRevisionComplete(current.id, 'needs_practice')
+    await createRevision({
       user_id: current.user_id,
       topic_id: current.topic_id,
       revision_number: current.revision_number,
@@ -369,8 +344,7 @@ function RevisionSession({ onComplete }: { onComplete: () => void }) {
 
   async function handleSkip() {
     if (!current) return
-    const supabase = createClient()
-    await supabase.from('revisions').update({ scheduled_date: getSkipDate() }).eq('id', current.id)
+    await rescheduleRevision(current.id, getSkipDate())
     toast.info('Moved to tomorrow')
     advance()
   }

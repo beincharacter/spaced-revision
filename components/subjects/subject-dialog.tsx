@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SUBJECT_COLORS, type Subject } from '@/types'
-import { createClient } from '@/lib/supabase/client'
+import { getCurrentUser } from '@/lib/data/profiles'
+import { createSubject, updateSubject } from '@/lib/data/subjects'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
@@ -34,16 +35,15 @@ export function SubjectDialog({ open, onClose, subject, onSaved }: SubjectDialog
   async function handleSave() {
     if (!name.trim()) return
     setLoading(true)
-    const supabase = createClient()
 
     if (subject) {
-      const { error } = await supabase.from('subjects').update({ name: name.trim(), color }).eq('id', subject.id)
+      const { error } = await updateSubject(subject.id, { name: name.trim(), color })
       if (error) { toast.error('Failed to update subject'); setLoading(false); return }
       toast.success('Subject updated')
     } else {
-      const { data: { user } } = await supabase.auth.getUser()
+      const user = await getCurrentUser()
       if (!user) return
-      const { error } = await supabase.from('subjects').insert({ name: name.trim(), color, user_id: user.id })
+      const { error } = await createSubject({ name: name.trim(), color, user_id: user.id })
       if (error) { toast.error('Failed to create subject'); setLoading(false); return }
       toast.success('Subject created!')
     }

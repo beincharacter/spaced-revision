@@ -8,18 +8,21 @@ export async function DELETE(request: Request) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { revisionId } = await request.json()
-  if (!revisionId) return NextResponse.json({ error: 'revisionId required' }, { status: 400 })
+  const { revisionId, eventId } = await request.json()
+  if (!revisionId && !eventId) return NextResponse.json({ error: 'revisionId or eventId required' }, { status: 400 })
 
-  // Load the revision to get google_event_id
+  const table = eventId ? 'events' : 'revisions'
+  const recordId = eventId || revisionId
+
+  // Load the record to get google_event_id
   const { data: revision } = await supabase
-    .from('revisions')
+    .from(table)
     .select('id, google_event_id, user_id')
-    .eq('id', revisionId)
+    .eq('id', recordId)
     .eq('user_id', user.id)
     .single()
 
-  if (!revision) return NextResponse.json({ error: 'Revision not found' }, { status: 404 })
+  if (!revision) return NextResponse.json({ error: `${eventId ? 'Event' : 'Revision'} not found` }, { status: 404 })
 
   // Delete from Google Calendar if synced
   if (revision.google_event_id) {
@@ -48,8 +51,8 @@ export async function DELETE(request: Request) {
     }
   }
 
-  // Delete revision from Supabase
-  await supabase.from('revisions').delete().eq('id', revisionId)
+  // Delete record from Supabase
+  await supabase.from(table).delete().eq('id', recordId)
 
   return NextResponse.json({ deleted: true })
 }

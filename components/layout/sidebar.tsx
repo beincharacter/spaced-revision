@@ -6,7 +6,7 @@ import {
   CalendarDays, Settings, LogOut, Zap,
 } from 'lucide-react'
 import { cn, getSubjectInitials } from '@/lib/utils'
-import { createClient } from '@/lib/supabase/client'
+import { getCurrentUser, signOut } from '@/lib/data/profiles'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { useEffect, useState } from 'react'
@@ -26,21 +26,19 @@ export function Sidebar() {
   const [user, setUser] = useState<{ name: string | null; email: string; avatar?: string } | null>(null)
 
   useEffect(() => {
-    const supabase = createClient()
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) {
+    getCurrentUser().then(u => {
+      if (u) {
         setUser({
-          name: data.user.user_metadata?.full_name || null,
-          email: data.user.email || '',
-          avatar: data.user.user_metadata?.avatar_url,
+          name: u.user_metadata?.full_name || null,
+          email: u.email || '',
+          avatar: u.user_metadata?.avatar_url,
         })
       }
     })
   }, [])
 
   async function handleLogout() {
-    const supabase = createClient()
-    await supabase.auth.signOut()
+    await signOut()
     router.push('/')
   }
 

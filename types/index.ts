@@ -55,6 +55,16 @@ export interface Revision {
   topic?: Topic & { subject?: Subject }
 }
 
+export interface CustomEvent {
+  id: string
+  user_id: string
+  title: string
+  event_date: string
+  notes: string | null
+  google_event_id: string | null
+  created_at: string
+}
+
 export interface HeatmapEntry {
   date: string
   count: number
