@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { getProfileCalendarInfo } from '@/lib/data/profiles'
+import { getRevisionsInRange, getUnsyncedPendingCount, getMaxScheduledDate } from '@/lib/data/revisions'
 import {
   format, startOfMonth, endOfMonth, eachDayOfInterval,
   startOfWeek, endOfWeek, isSameMonth, isToday, isSameDay,
@@ -36,46 +37,28 @@ export default function CalendarPage() {
 
   useEffect(() => {
     async function fetchMaxRevisionDate() {
-      const supabase = createClient()
-      const { data } = await supabase
-        .from('revisions')
-        .select('scheduled_date')
-        .order('scheduled_date', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      if (data?.scheduled_date) setMaxRevisionDate(new Date(data.scheduled_date))
+      const maxDate = await getMaxScheduledDate()
+      if (maxDate) setMaxRevisionDate(maxDate)
     }
     fetchMaxRevisionDate()
   }, [])
 
   const fetchRevisions = useCallback(async () => {
-    const supabase = createClient()
     const start = format(startOfMonth(currentMonth), 'yyyy-MM-dd')
     const end = format(endOfMonth(currentMonth), 'yyyy-MM-dd')
 
-    const [{ data }, { data: profile }] = await Promise.all([
-      supabase
-        .from('revisions')
-        .select('*, topic:topics(*, subject:subjects(*))')
-        .gte('scheduled_date', start)
-        .lte('scheduled_date', end)
-        .order('scheduled_date'),
-      supabase.from('profiles').select('google_access_token, created_at').single(),
+    const [data, profile] = await Promise.all([
+      getRevisionsInRange(start, end),
+      getProfileCalendarInfo(),
     ])
 
-    if (data) setRevisions(data as unknown as Revision[])
-    const connected = !!(profile as { google_access_token?: string })?.google_access_token
+    setRevisions(data as unknown as Revision[])
+    const connected = !!profile?.google_access_token
     setCalendarConnected(connected)
-    const createdAt = (profile as { created_at?: string })?.created_at
-    if (createdAt) setAccountCreatedAt(new Date(createdAt))
+    if (profile?.created_at) setAccountCreatedAt(new Date(profile.created_at))
 
     if (connected) {
-      const { count } = await supabase
-        .from('revisions')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'pending')
-        .is('google_event_id', null)
-      setPendingUnsyncedCount(count || 0)
+      setPendingUnsyncedCount(await getUnsyncedPendingCount())
     }
 
     setLoading(false)

@@ -7,7 +7,8 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import type { Subject } from '@/types'
-import { createClient } from '@/lib/supabase/client'
+import { getCurrentUser } from '@/lib/data/profiles'
+import { createTopics } from '@/lib/data/topics'
 import { toast } from 'sonner'
 
 interface BulkImportDialogProps {
@@ -27,12 +28,11 @@ export function BulkImportDialog({ open, onClose, subjects, onImported }: BulkIm
   async function handleImport() {
     if (!subjectId || parsed.length === 0) return
     setLoading(true)
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getCurrentUser()
     if (!user) return
 
     const rows = parsed.map(name => ({ name, subject_id: subjectId, user_id: user.id, difficulty: 'medium' as const }))
-    const { error } = await supabase.from('topics').insert(rows)
+    const { error } = await createTopics(rows)
 
     setLoading(false)
     if (error) { toast.error('Import failed'); return }

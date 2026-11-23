@@ -1,8 +1,10 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import type { Subject } from '@/types'
+import { listSubjects, deleteSubject } from '@/lib/data/subjects'
+import { getTopicIdsForSubject, getTopicCountForSubject } from '@/lib/data/topics'
+import { getRevisionCountsForTopicIds } from '@/lib/data/revisions'
 import { getSubjectInitials } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -25,22 +27,16 @@ export default function SubjectsPage() {
   const [editSubject, setEditSubject] = useState<Subject | null>(null)
 
   async function fetchSubjects() {
-    const supabase = createClient()
-    const { data } = await supabase.from('subjects').select('*').order('created_at')
-    if (!data) { setLoading(false); return }
+    const data = await listSubjects()
 
     const enriched = await Promise.all(
       data.map(async (s: Subject) => {
-        const [{ count: topic_count }, { count: revision_count }, { count: completed_count }] = await Promise.all([
-          supabase.from('topics').select('id', { count: 'exact', head: true }).eq('subject_id', s.id),
-          supabase.from('revisions').select('id', { count: 'exact', head: true }).in('topic_id',
-            (await supabase.from('topics').select('id').eq('subject_id', s.id)).data?.map((t: { id: string }) => t.id) || []
-          ),
-          supabase.from('revisions').select('id', { count: 'exact', head: true }).eq('status', 'completed').in('topic_id',
-            (await supabase.from('topics').select('id').eq('subject_id', s.id)).data?.map((t: { id: string }) => t.id) || []
-          ),
+        const [topic_count, topicIds] = await Promise.all([
+          getTopicCountForSubject(s.id),
+          getTopicIdsForSubject(s.id),
         ])
-        return { ...s, topic_count: topic_count || 0, revision_count: revision_count || 0, completed_count: completed_count || 0 }
+        const { total: revision_count, completed: completed_count } = await getRevisionCountsForTopicIds(topicIds)
+        return { ...s, topic_count, revision_count, completed_count }
       })
     )
     setSubjects(enriched)
@@ -51,8 +47,7 @@ export default function SubjectsPage() {
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this subject and all its topics?')) return
-    const supabase = createClient()
-    await supabase.from('subjects').delete().eq('id', id)
+    await deleteSubject(id)
     toast.success('Subject deleted')
     fetchSubjects()
   }

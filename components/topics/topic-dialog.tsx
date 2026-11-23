@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { Topic, Subject } from '@/types'
-import { createClient } from '@/lib/supabase/client'
+import { getCurrentUser } from '@/lib/data/profiles'
+import { createTopic, updateTopic } from '@/lib/data/topics'
 import { toast } from 'sonner'
 
 interface TopicDialogProps {
@@ -39,16 +40,15 @@ export function TopicDialog({ open, onClose, topic, subjects, defaultSubjectId, 
   async function handleSave() {
     if (!name.trim() || !subjectId) return
     setLoading(true)
-    const supabase = createClient()
 
     if (topic) {
-      const { error } = await supabase.from('topics').update({ name: name.trim(), subject_id: subjectId, difficulty }).eq('id', topic.id)
+      const { error } = await updateTopic(topic.id, { name: name.trim(), subject_id: subjectId, difficulty })
       if (error) { toast.error('Failed to update topic'); setLoading(false); return }
       toast.success('Topic updated')
     } else {
-      const { data: { user } } = await supabase.auth.getUser()
+      const user = await getCurrentUser()
       if (!user) return
-      const { error } = await supabase.from('topics').insert({ name: name.trim(), subject_id: subjectId, difficulty, user_id: user.id })
+      const { error } = await createTopic({ name: name.trim(), subject_id: subjectId, difficulty, user_id: user.id })
       if (error) { toast.error('Failed to create topic'); setLoading(false); return }
       toast.success('Topic created!')
     }

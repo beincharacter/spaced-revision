@@ -1,7 +1,13 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { format, addDays } from 'date-fns'
+import { getProfile } from '@/lib/data/profiles'
+import { listSubjectsBasic } from '@/lib/data/subjects'
+import {
+  getDueTodayRevisions, getOverdueRevisions, getUpcomingRevisions,
+  getCompletedTodayCount, getCompletedDatesSince, getRevisionCountsForTopic,
+  markRevisionComplete, rescheduleRevision, createRevision,
+} from '@/lib/data/revisions'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -36,57 +42,48 @@ export default function DashboardPage() {
   const upcomingEnd = addDaysToToday(7)
 
   const fetchData = useCallback(async () => {
-    const supabase = createClient()
-
     const [
-      { data: profileData },
-      { data: dueTodayData },
-      { data: overdueData },
-      { data: upcomingData },
-      { data: completedData },
-      { data: subjectsData },
-      { data: heatmapData },
+      profileData,
+      dueTodayData,
+      overdueData,
+      upcomingData,
+      completedCount,
+      subjectsData,
+      completedDates,
     ] = await Promise.all([
-      supabase.from('profiles').select('*').single(),
-      supabase.from('revisions').select('*, topic:topics(*, subject:subjects(*))').eq('scheduled_date', today).eq('status', 'pending').order('created_at'),
-      supabase.from('revisions').select('*, topic:topics(*, subject:subjects(*))').lt('scheduled_date', today).eq('status', 'pending').order('scheduled_date'),
-      supabase.from('revisions').select('*, topic:topics(*, subject:subjects(*))').gt('scheduled_date', today).lte('scheduled_date', upcomingEnd).eq('status', 'pending').order('scheduled_date').limit(20),
-      supabase.from('revisions').select('id', { count: 'exact' }).eq('scheduled_date', today).eq('status', 'completed'),
-      supabase.from('subjects').select('id, name, color'),
-      supabase.from('revisions').select('scheduled_date').eq('status', 'completed').gte('scheduled_date', format(addDays(new Date(), -364), 'yyyy-MM-dd')),
+      getProfile(),
+      getDueTodayRevisions(today),
+      getOverdueRevisions(today),
+      getUpcomingRevisions(today, upcomingEnd, 20),
+      getCompletedTodayCount(today),
+      listSubjectsBasic(),
+      getCompletedDatesSince(format(addDays(new Date(), -364), 'yyyy-MM-dd')),
     ])
 
     if (profileData) {
       setProfile(profileData as Profile)
-      setCalendarConnected(!!(profileData as { google_access_token?: string }).google_access_token)
+      setCalendarConnected(!!profileData.google_access_token)
     }
-    if (dueTodayData) setDueToday(dueTodayData as unknown as Revision[])
-    if (overdueData) setOverdue(overdueData as unknown as Revision[])
-    if (upcomingData) setUpcoming(upcomingData as unknown as Revision[])
-    if (completedData) setCompletedToday(completedData.length || 0)
+    setDueToday(dueTodayData as unknown as Revision[])
+    setOverdue(overdueData as unknown as Revision[])
+    setUpcoming(upcomingData as unknown as Revision[])
+    setCompletedToday(completedCount)
 
     // Subject progress
-    if (subjectsData) {
-      const progressItems = await Promise.all(
-        (subjectsData as Subject[]).map(async s => {
-          const [{ count: total }, { count: completed }] = await Promise.all([
-            supabase.from('revisions').select('id', { count: 'exact', head: true }).eq('topic_id', s.id),
-            supabase.from('revisions').select('id', { count: 'exact', head: true }).eq('status', 'completed'),
-          ])
-          return { id: s.id, name: s.name, color: s.color, completed: completed || 0, total: total || 0 }
-        })
-      )
-      setSubjectProgress(progressItems)
-    }
+    const progressItems = await Promise.all(
+      (subjectsData as Subject[]).map(async s => {
+        const { total, completed } = await getRevisionCountsForTopic(s.id)
+        return { id: s.id, name: s.name, color: s.color, completed, total }
+      })
+    )
+    setSubjectProgress(progressItems)
 
     // Heatmap
-    if (heatmapData) {
-      const counts: Record<string, number> = {}
-      heatmapData.forEach(({ scheduled_date }: { scheduled_date: string }) => {
-        counts[scheduled_date] = (counts[scheduled_date] || 0) + 1
-      })
-      setHeatmap(Object.entries(counts).map(([date, count]) => ({ date, count })))
-    }
+    const counts: Record<string, number> = {}
+    completedDates.forEach(date => {
+      counts[date] = (counts[date] || 0) + 1
+    })
+    setHeatmap(Object.entries(counts).map(([date, count]) => ({ date, count })))
 
     setLoading(false)
   }, [today, upcomingEnd])
@@ -94,25 +91,22 @@ export default function DashboardPage() {
   useEffect(() => { fetchData() }, [fetchData])
 
   async function handleComplete(id: string) {
-    const supabase = createClient()
-    await supabase.from('revisions').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', id)
+    await markRevisionComplete(id)
     toast.success('Revision marked complete!')
     fetchData()
   }
 
   async function handleSkip(id: string) {
-    const supabase = createClient()
-    await supabase.from('revisions').update({ scheduled_date: getSkipDate() }).eq('id', id)
+    await rescheduleRevision(id, getSkipDate())
     toast.info('Revision moved to tomorrow')
     fetchData()
   }
 
   async function handleNeedsPractice(id: string) {
-    const supabase = createClient()
     const rev = [...dueToday, ...overdue].find(r => r.id === id)
     if (!rev) return
-    await supabase.from('revisions').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', id)
-    await supabase.from('revisions').insert({
+    await markRevisionComplete(id)
+    await createRevision({
       user_id: rev.user_id,
       topic_id: rev.topic_id,
       revision_number: rev.revision_number,

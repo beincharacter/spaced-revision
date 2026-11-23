@@ -1,10 +1,13 @@
 'use client'
 import { useEffect, useState, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import type { Topic, Subject } from '@/types'
 import { scheduleRevisions } from '@/lib/spaced-repetition'
+import { getCurrentUser, getProfileRevisionIntervals } from '@/lib/data/profiles'
+import { listSubjectsByName } from '@/lib/data/subjects'
+import { listTopicsWithSubject, markTopicStudied, deleteTopic } from '@/lib/data/topics'
+import { createRevisions } from '@/lib/data/revisions'
 import { formatDate } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -44,18 +47,14 @@ function TopicsPageInner() {
   const [userIntervals, setUserIntervals] = useState<number[] | null>(null)
 
   const fetchData = useCallback(async () => {
-    const supabase = createClient()
-    const [{ data: topicsData }, { data: subjectsData }, { data: profileData }] = await Promise.all([
-      supabase.from('topics').select('*, subject:subjects(*)').order('created_at', { ascending: false }),
-      supabase.from('subjects').select('*').order('name'),
-      supabase.from('profiles').select('revision_intervals').single(),
+    const [topicsData, subjectsData, savedIntervals] = await Promise.all([
+      listTopicsWithSubject(),
+      listSubjectsByName(),
+      getProfileRevisionIntervals(),
     ])
-    if (topicsData) setTopics(topicsData as unknown as Topic[])
-    if (subjectsData) setSubjects(subjectsData as Subject[])
-    if (profileData) {
-      const saved = (profileData as { revision_intervals?: number[] }).revision_intervals
-      if (saved?.length) setUserIntervals(saved)
-    }
+    setTopics(topicsData)
+    setSubjects(subjectsData)
+    if (savedIntervals?.length) setUserIntervals(savedIntervals)
     setLoading(false)
   }, [])
 
@@ -68,21 +67,20 @@ function TopicsPageInner() {
   async function confirmMarkStudied(studyDate: Date, chosenIntervals: number[]) {
     if (!studyDialogTopic) return
     setStudyLoading(true)
-    const supabase = createClient()
     // Use intervals chosen in the dialog (already sorted/validated there)
     const revisions = scheduleRevisions(studyDate, chosenIntervals)
 
-    await supabase.from('topics').update({
+    await markTopicStudied(studyDialogTopic.id, {
       first_studied_at: studyDate.toISOString(),
       last_revised_at: studyDate.toISOString(),
       revision_count: (studyDialogTopic.revision_count || 0) + 1,
-    }).eq('id', studyDialogTopic.id)
+    })
 
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getCurrentUser()
     if (!user) { setStudyLoading(false); return }
 
-    await supabase.from('revisions').insert(
-      revisions.map(r => ({ ...r, topic_id: studyDialogTopic.id, user_id: user.id, status: 'pending' }))
+    await createRevisions(
+      revisions.map(r => ({ ...r, topic_id: studyDialogTopic.id, user_id: user.id, status: 'pending' as const }))
     )
 
     toast.success(`${revisions.length} revisions scheduled for "${studyDialogTopic.name}"!`)
@@ -93,8 +91,7 @@ function TopicsPageInner() {
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this topic and all its revisions?')) return
-    const supabase = createClient()
-    await supabase.from('topics').delete().eq('id', id)
+    await deleteTopic(id)
     toast.success('Topic deleted')
     fetchData()
   }

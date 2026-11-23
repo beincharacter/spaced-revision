@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { signInWithGoogle, signInWithMagicLink } from '@/lib/data/profiles'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -20,14 +20,7 @@ export default function LoginPage() {
   const [magicLinkSent, setMagicLinkSent] = useState(false)
 
   async function handleGoogleLogin() {
-    const supabase = createClient()
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-        queryParams: { access_type: 'offline', prompt: 'consent' },
-      },
-    })
+    const { error } = await signInWithGoogle(`${window.location.origin}/auth/callback`)
     if (error) toast.error('Failed to sign in with Google')
   }
 
@@ -35,11 +28,7 @@ export default function LoginPage() {
     e.preventDefault()
     if (!email) return
     setLoading(true)
-    const supabase = createClient()
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
-    })
+    const { error } = await signInWithMagicLink(email, `${window.location.origin}/auth/callback`)
     setLoading(false)
     if (error) {
       toast.error(error.message)

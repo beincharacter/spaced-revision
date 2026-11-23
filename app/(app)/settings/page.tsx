@@ -1,9 +1,10 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import type { Profile } from '@/types'
+import { getCurrentUser, getProfile, updateProfile, disconnectGoogleCalendar, deleteAllUserData } from '@/lib/data/profiles'
+import { listSubjectNames, createSubjects } from '@/lib/data/subjects'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -49,13 +50,12 @@ function SettingsPageInner() {
 
   useEffect(() => {
     async function fetchProfile() {
-      const supabase = createClient()
-      const { data } = await supabase.from('profiles').select('*').single()
+      const data = await getProfile()
       if (data) {
         setProfile(data as typeof profile)
-        setIsCustomExam(!!(data as Partial<Profile>).exam_name && !((data as Partial<Profile>).exam_name! in EXAM_TEMPLATES))
+        setIsCustomExam(!!data.exam_name && !(data.exam_name in EXAM_TEMPLATES))
         // Load saved custom intervals, fall back to default
-        const saved = (data as { revision_intervals?: number[] }).revision_intervals
+        const saved = data.revision_intervals
         if (saved?.length) setIntervals(saved)
       }
       setLoading(false)
@@ -67,18 +67,16 @@ function SettingsPageInner() {
 
   async function handleSave() {
     setSaving(true)
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    const { error } = await supabase.from('profiles').update({
+    const user = await getCurrentUser()
+    const { error } = await updateProfile(user?.id || '', {
       name: profile.name,
       exam_name: profile.exam_name,
       target_exam_date: profile.target_exam_date || null,
       revision_intervals: intervals,
-    }).eq('id', user?.id || '')
+    })
 
     if (!error && user && profile.exam_name && EXAM_TEMPLATES[profile.exam_name]) {
-      const { data: existing } = await supabase.from('subjects').select('name').eq('user_id', user.id)
-      const existingNames = new Set((existing || []).map(s => s.name.toLowerCase()))
+      const existingNames = new Set((await listSubjectNames(user.id)).map(n => n.toLowerCase()))
       const candidates = EXAM_TEMPLATES[profile.exam_name].subjects.filter(
         name => !existingNames.has(name.toLowerCase())
       )
@@ -93,10 +91,9 @@ function SettingsPageInner() {
   async function handleAddExamSubjects(selected: string[]) {
     if (!selected.length) { setExamSubjectsCandidates([]); return }
     setAddingSubjects(true)
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getCurrentUser()
     if (!user) { setAddingSubjects(false); return }
-    const { error } = await supabase.from('subjects').insert(
+    const { error } = await createSubjects(
       selected.map((name, i) => ({
         name,
         color: SUBJECT_COLORS[i % SUBJECT_COLORS.length],
@@ -114,14 +111,9 @@ function SettingsPageInner() {
   }
 
   async function handleDisconnectCalendar() {
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getCurrentUser()
     if (!user) return
-    await supabase.from('profiles').update({
-      google_access_token: null,
-      google_refresh_token: null,
-      google_token_expiry: null,
-    }).eq('id', user.id)
+    await disconnectGoogleCalendar(user.id)
     setProfile(p => ({ ...p, google_access_token: null, google_refresh_token: null }))
     toast.success('Google Calendar disconnected')
   }
@@ -147,14 +139,9 @@ function SettingsPageInner() {
 
   async function handleResetData() {
     if (!confirm('This will permanently delete all your subjects, topics, and revisions. Are you sure?')) return
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getCurrentUser()
     if (!user) return
-    await Promise.all([
-      supabase.from('revisions').delete().eq('user_id', user.id),
-      supabase.from('topics').delete().eq('user_id', user.id),
-      supabase.from('subjects').delete().eq('user_id', user.id),
-    ])
+    await deleteAllUserData(user.id)
     toast.success('All data deleted')
   }
 
