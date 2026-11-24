@@ -8,17 +8,18 @@ import { supabase } from '@/lib/supabase';
 export type ReminderPreferences = {
   enabled: boolean;
   hour: number;
+  minute: number;
 };
 
 export type ReminderPermissionStatus = 'granted' | 'not-granted' | 'blocked' | 'unavailable';
 
-export const REMINDER_TIME_OPTIONS = [
-  { hour: 8, label: '8 AM' },
-  { hour: 9, label: '9 AM' },
-  { hour: 19, label: '7 PM' },
-] as const;
+export function formatReminderTime(hour: number, minute: number) {
+  const period = hour < 12 ? 'AM' : 'PM';
+  const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+  return `${displayHour}:${String(minute).padStart(2, '0')} ${period}`;
+}
 
-const DEFAULT_PREFERENCES: ReminderPreferences = { enabled: false, hour: 9 };
+const DEFAULT_PREFERENCES: ReminderPreferences = { enabled: false, hour: 9, minute: 0 };
 const REMINDER_KIND = 'revision-reminder';
 const ANDROID_CHANNEL_ID = 'revision-reminders';
 const MAX_SCHEDULED_REMINDER_DATES = 60;
@@ -59,11 +60,12 @@ export async function getReminderPreferences(userId: string): Promise<ReminderPr
     const parsed: unknown = JSON.parse(stored);
     if (typeof parsed !== 'object' || parsed === null) return DEFAULT_PREFERENCES;
 
-    const { enabled, hour } = parsed as Partial<ReminderPreferences>;
-    const allowedHour = REMINDER_TIME_OPTIONS.some((option) => option.hour === hour);
-    if (typeof enabled !== 'boolean' || typeof hour !== 'number' || !allowedHour) return DEFAULT_PREFERENCES;
+    const { enabled, hour, minute } = parsed as Partial<ReminderPreferences>;
+    const validHour = typeof hour === 'number' && hour >= 0 && hour <= 23;
+    const validMinute = typeof minute === 'number' && minute >= 0 && minute <= 59;
+    if (typeof enabled !== 'boolean' || !validHour) return DEFAULT_PREFERENCES;
 
-    return { enabled, hour };
+    return { enabled, hour, minute: validMinute ? minute : 0 };
   } catch {
     return DEFAULT_PREFERENCES;
   }
@@ -158,7 +160,7 @@ async function syncRevisionRemindersForUser(userId: string) {
     .sort(([left], [right]) => left.localeCompare(right))
     .flatMap(([scheduledDate, count]) => {
       const [year, month, day] = scheduledDate.split('-').map(Number);
-      const reminderDate = new Date(year, month - 1, day, preferences.hour, 0, 0, 0);
+      const reminderDate = new Date(year, month - 1, day, preferences.hour, preferences.minute, 0, 0);
       if (Number.isNaN(reminderDate.getTime()) || reminderDate <= now) return [];
 
       const dateLabel = new Intl.DateTimeFormat(undefined, {

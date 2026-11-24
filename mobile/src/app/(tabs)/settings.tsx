@@ -1,16 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
-import { ActionButton, AppScreen, Field, PageHeader, Pill, SectionHeading, Surface } from '@/components/ui';
+import { ActionButton, AppScreen, Field, PageHeader, Pill, SectionHeading, Surface, TextAction } from '@/components/ui';
 import { openGoogleAuth } from '@/lib/auth';
 import { getProfile, saveRevisionIntervals } from '@/lib/revision-data';
 import {
   areRevisionRemindersSupported,
+  formatReminderTime,
   getReminderPermissionStatus,
   getReminderPreferences,
-  REMINDER_TIME_OPTIONS,
   requestRevisionReminderPermission,
   saveReminderPreferences,
   syncRevisionReminders,
@@ -25,8 +26,10 @@ export default function SettingsScreen() {
   const { user, signOut } = useAuth();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [intervalDraft, setIntervalDraft] = useState(REVISION_INTERVALS.join(', '));
-  const [reminderPreferences, setReminderPreferences] = useState<ReminderPreferences>({ enabled: false, hour: 9 });
+  const [reminderPreferences, setReminderPreferences] = useState<ReminderPreferences>({ enabled: false, hour: 9, minute: 0 });
   const [reminderPermission, setReminderPermission] = useState<ReminderPermissionStatus>('unavailable');
+  const [timePickerOpen, setTimePickerOpen] = useState(false);
+  const [timeDraft, setTimeDraft] = useState<{ hour: number; minute: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingReminders, setSavingReminders] = useState(false);
@@ -105,7 +108,7 @@ export default function SettingsScreen() {
       const scheduledCount = await syncRevisionReminders(user.id);
 
       if (nextPreferences.enabled) {
-        const timeLabel = REMINDER_TIME_OPTIONS.find((option) => option.hour === nextPreferences.hour)?.label ?? '9 AM';
+        const timeLabel = formatReminderTime(nextPreferences.hour, nextPreferences.minute);
         Alert.alert('Reminders enabled', `${scheduledCount} upcoming revision dates are set for ${timeLabel}.`);
       } else {
         Alert.alert('Reminders paused', 'This phone will no longer send revision reminders.');
@@ -172,17 +175,49 @@ export default function SettingsScreen() {
           </View>
           <Text style={styles.formLabel}>Reminder time</Text>
           <View style={styles.reminderTimeRow}>
-            {REMINDER_TIME_OPTIONS.map((option) => (
-              <Pill
-                key={option.hour}
-                label={option.label}
-                selected={reminderPreferences.hour === option.hour}
-                onPress={areRevisionRemindersSupported() && !savingReminders
-                  ? () => void updateReminderPreferences({ ...reminderPreferences, hour: option.hour })
-                  : undefined}
-              />
-            ))}
+            <TextAction
+              label={formatReminderTime(reminderPreferences.hour, reminderPreferences.minute)}
+              onPress={() => {
+                if (!areRevisionRemindersSupported() || savingReminders) return;
+                setTimeDraft({ hour: reminderPreferences.hour, minute: reminderPreferences.minute });
+                setTimePickerOpen(true);
+              }}
+            />
           </View>
+          {timePickerOpen && timeDraft ? (
+            <View>
+              <DateTimePicker
+                value={new Date(2000, 0, 1, timeDraft.hour, timeDraft.minute)}
+                mode="time"
+                is24Hour={false}
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onValueChange={(_event, selectedDate) => {
+                  const nextDraft = { hour: selectedDate.getHours(), minute: selectedDate.getMinutes() };
+                  if (Platform.OS === 'ios') {
+                    setTimeDraft(nextDraft);
+                  } else {
+                    setTimePickerOpen(false);
+                    setTimeDraft(null);
+                    void updateReminderPreferences({ ...reminderPreferences, ...nextDraft });
+                  }
+                }}
+                onDismiss={() => {
+                  setTimePickerOpen(false);
+                  setTimeDraft(null);
+                }}
+              />
+              {Platform.OS === 'ios' ? (
+                <TextAction
+                  label="Done"
+                  onPress={() => {
+                    setTimePickerOpen(false);
+                    void updateReminderPreferences({ ...reminderPreferences, ...timeDraft });
+                    setTimeDraft(null);
+                  }}
+                />
+              ) : null}
+            </View>
+          ) : null}
           <Text style={styles.hint}>
             {Platform.OS === 'web'
               ? 'On-device reminders are available in the iOS and Android apps.'
