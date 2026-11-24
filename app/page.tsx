@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import Link from 'next/link'
 import { signInWithGoogle, signInWithMagicLink } from '@/lib/data/profiles'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -156,7 +157,10 @@ export default function LoginPage() {
           </div>
 
           <p className="text-center text-xs text-slate-400 mt-6">
-            By signing in, you agree to our Terms of Service and Privacy Policy.
+            By signing in, you agree to our{' '}
+            <Link href="/terms" className="text-indigo-600 hover:underline">Terms of Service</Link>
+            {' '}and{' '}
+            <Link href="/privacy" className="text-indigo-600 hover:underline">Privacy Policy</Link>.
           </p>
         </div>
       </div>
