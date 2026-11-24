@@ -10,6 +10,9 @@ export const metadata: Metadata = {
     statusBarStyle: 'black-translucent',
     title: 'ReviseFlow',
   },
+  verification: {
+    google: 'Er4f5KSxjZXv7vw85-9sGGbyK-7YzC7084qrcLkJhv4',
+  },
 }
 
 export const viewport: Viewport = {
