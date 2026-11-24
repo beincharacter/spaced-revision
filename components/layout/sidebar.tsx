@@ -39,7 +39,7 @@ export function Sidebar() {
 
   async function handleLogout() {
     await signOut()
-    router.push('/')
+    router.push('/login')
   }
 
   return (
