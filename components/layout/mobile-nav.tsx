@@ -1,11 +1,12 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, FileText, Brain, CalendarDays, Settings } from 'lucide-react'
+import { LayoutDashboard, BookOpen, FileText, Brain, CalendarDays, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const items = [
   { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
+  { href: '/subjects', label: 'Subjects', icon: BookOpen },
   { href: '/topics', label: 'Topics', icon: FileText },
   { href: '/revision', label: 'Revise', icon: Brain },
   { href: '/calendar', label: 'Calendar', icon: CalendarDays },
