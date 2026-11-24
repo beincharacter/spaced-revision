@@ -1,31 +1,53 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { format } from 'date-fns';
 
-import { ActionButton, AppScreen, EmptyState, PageHeader, SectionHeading, Surface } from '@/components/ui';
+import { ActionButton, AppScreen, EmptyState, Field, PageHeader, SectionHeading, Sheet, Surface, TextAction } from '@/components/ui';
 import { openGoogleAuth } from '@/lib/auth';
 import { syncGoogleCalendar } from '@/lib/calendar-sync';
-import { formatStudyDate, getCalendarRevisions, getProfile } from '@/lib/revision-data';
+import {
+  createCustomEvent,
+  deleteCustomEvent,
+  formatStudyDate,
+  getCalendarRevisions,
+  getProfile,
+  getUpcomingEvents,
+  updateCustomEvent,
+} from '@/lib/revision-data';
 import { useAuth } from '@/providers/auth-provider';
 import { colors } from '@/theme';
-import type { Profile, Revision } from '@/types';
+import type { CustomEvent, Profile, Revision } from '@/types';
 
 export default function CalendarScreen() {
   const { user, session } = useAuth();
   const [revisions, setRevisions] = useState<Revision[]>([]);
+  const [events, setEvents] = useState<CustomEvent[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [eventSheetOpen, setEventSheetOpen] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<CustomEvent | null>(null);
+  const [eventTitle, setEventTitle] = useState('');
+  const [eventDate, setEventDate] = useState('');
+  const [eventNotes, setEventNotes] = useState('');
+  const [savingEvent, setSavingEvent] = useState(false);
+  const [deletingEventId, setDeletingEventId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     try {
-      const [nextRevisions, nextProfile] = await Promise.all([getCalendarRevisions(user.id), getProfile(user.id)]);
+      const [nextRevisions, nextProfile, nextEvents] = await Promise.all([
+        getCalendarRevisions(user.id),
+        getProfile(user.id),
+        getUpcomingEvents(user.id),
+      ]);
       setRevisions(nextRevisions);
       setProfile(nextProfile);
+      setEvents(nextEvents);
     } catch (error) {
       Alert.alert('Could not load your calendar', error instanceof Error ? error.message : 'Please try again.');
     } finally {
@@ -42,6 +64,61 @@ export default function CalendarScreen() {
     revisions.forEach((revision) => map.set(revision.scheduled_date, [...(map.get(revision.scheduled_date) ?? []), revision]));
     return [...map.entries()];
   }, [revisions]);
+
+  function openAddEvent() {
+    setEditingEvent(null);
+    setEventTitle('');
+    setEventDate(getTodayStr());
+    setEventNotes('');
+    setEventSheetOpen(true);
+  }
+
+  function openEditEvent(event: CustomEvent) {
+    setEditingEvent(event);
+    setEventTitle(event.title);
+    setEventDate(event.event_date);
+    setEventNotes(event.notes ?? '');
+    setEventSheetOpen(true);
+  }
+
+  function getTodayStr() {
+    return format(new Date(), 'yyyy-MM-dd');
+  }
+
+  async function handleSaveEvent() {
+    if (!user || !eventTitle.trim() || !eventDate) {
+      Alert.alert('Complete the event details', 'Give this event a title and a date.');
+      return;
+    }
+    setSavingEvent(true);
+    try {
+      if (editingEvent) {
+        await updateCustomEvent(user.id, editingEvent.id, eventTitle, eventDate, eventNotes.trim() || null);
+      } else {
+        await createCustomEvent(user.id, eventTitle, eventDate, eventNotes.trim() || null);
+      }
+      setEventSheetOpen(false);
+      setEditingEvent(null);
+      await refresh();
+    } catch (error) {
+      Alert.alert('Could not save this event', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setSavingEvent(false);
+    }
+  }
+
+  async function handleDeleteEvent(event: CustomEvent) {
+    if (!user) return;
+    setDeletingEventId(event.id);
+    try {
+      await deleteCustomEvent(user.id, event.id);
+      await refresh();
+    } catch (error) {
+      Alert.alert('Could not delete this event', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setDeletingEventId(null);
+    }
+  }
 
   async function handleConnect() {
     setConnecting(true);
@@ -73,12 +150,13 @@ export default function CalendarScreen() {
   }
 
   return (
+    <>
     <AppScreen>
       <PageHeader
         eyebrow="Your upcoming plan"
         title="Revision calendar"
         subtitle="A clear look at the next six weeks."
-        right={<View style={styles.headerIcon}><Ionicons name="calendar" size={18} color={colors.primary} /></View>}
+        right={<ActionButton compact label="Add event" icon={<Ionicons name="add" size={17} color="#FFFFFF" />} onPress={openAddEvent} />}
       />
 
       <Surface style={styles.syncCard}>
@@ -98,6 +176,30 @@ export default function CalendarScreen() {
         />
         <Text style={styles.syncFootnote}>Sync creates events for pending reviews with a 9:00 AM reminder.</Text>
       </Surface>
+
+      {events.length > 0 ? (
+        <View>
+          <SectionHeading title="Your events" />
+          <View style={styles.dayList}>
+            {events.map((event) => {
+              const isDeleting = deletingEventId === event.id;
+              return (
+                <Surface key={event.id} style={[styles.eventRow, isDeleting && styles.dimmedRow]}>
+                  <View style={styles.pinIcon}><Ionicons name="pin" size={14} color={colors.primary} /></View>
+                  <View style={styles.eventCopy}>
+                    <Text style={styles.eventTitle} numberOfLines={1}>{event.title}</Text>
+                    <Text style={styles.eventSubtitle} numberOfLines={1}>{formatStudyDate(event.event_date, { weekday: 'short', month: 'short', day: 'numeric' })}{event.notes ? ` · ${event.notes}` : ''}</Text>
+                  </View>
+                  <TextAction label="Edit" onPress={() => openEditEvent(event)} />
+                  <Pressable accessibilityRole="button" accessibilityLabel="Delete event" hitSlop={8} disabled={isDeleting} onPress={() => void handleDeleteEvent(event)}>
+                    <Ionicons name="trash-outline" size={16} color={colors.danger} />
+                  </Pressable>
+                </Surface>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
 
       <View>
         <SectionHeading title="Upcoming revisions" />
@@ -136,6 +238,14 @@ export default function CalendarScreen() {
         </View>
       </View>
     </AppScreen>
+
+    <Sheet visible={eventSheetOpen} title={editingEvent ? 'Edit event' : 'Add an event'} onClose={() => setEventSheetOpen(false)}>
+      <Field label="Title" onChangeText={setEventTitle} placeholder="e.g. Mock test" value={eventTitle} maxLength={80} returnKeyType="done" />
+      <Field label="Date (YYYY-MM-DD)" onChangeText={setEventDate} placeholder={getTodayStr()} value={eventDate} maxLength={10} />
+      <Field label="Notes (optional)" onChangeText={setEventNotes} placeholder="Any extra details" value={eventNotes} multiline numberOfLines={3} />
+      <ActionButton label={editingEvent ? 'Save changes' : 'Add event'} onPress={() => void handleSaveEvent()} busy={savingEvent} />
+    </Sheet>
+    </>
   );
 }
 
@@ -165,4 +275,6 @@ const styles = StyleSheet.create({
   eventSubtitle: { marginTop: 4, color: colors.muted, fontSize: 9 },
   eventStatus: { color: colors.primary, fontSize: 9, fontWeight: '700' },
   completeStatus: { color: colors.success },
+  dimmedRow: { opacity: 0.5 },
+  pinIcon: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 11, backgroundColor: colors.primarySoft },
 });

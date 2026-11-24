@@ -24,6 +24,7 @@ export default function SubjectsScreen() {
   const [topicName, setTopicName] = useState('');
   const [topicSubjectId, setTopicSubjectId] = useState('');
   const [difficulty, setDifficulty] = useState<Topic['difficulty']>('medium');
+  const [subtopicsText, setSubtopicsText] = useState('');
   const [busyTopicId, setBusyTopicId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -55,6 +56,7 @@ export default function SubjectsScreen() {
     setTopicSubjectId(subjectId);
     setTopicName('');
     setDifficulty('medium');
+    setSubtopicsText('');
     setTopicSheetOpen(true);
   }
 
@@ -85,8 +87,10 @@ export default function SubjectsScreen() {
     }
     setSaving(true);
     try {
-      await createTopic(user.id, topicSubjectId, name, difficulty);
+      const subtopics = subtopicsText.split('\n').map((s) => s.trim()).filter(Boolean);
+      await createTopic(user.id, topicSubjectId, name, difficulty, subtopics);
       setTopicName('');
+      setSubtopicsText('');
       setTopicSheetOpen(false);
       await refresh();
     } catch (error) {
@@ -163,6 +167,7 @@ export default function SubjectsScreen() {
                             <Text style={styles.topicName} numberOfLines={1}>{topic.name}</Text>
                             <Text style={styles.topicMeta} numberOfLines={1}>
                               {nextDate ? `Next review · ${formatStudyDate(nextDate)}` : hasStarted ? 'Cycle complete' : 'Ready to schedule'}
+                              {topic.subtopics?.length ? ` · ${topic.subtopics.length} subtopic${topic.subtopics.length === 1 ? '' : 's'}` : ''}
                             </Text>
                           </View>
                           {!hasStarted ? (
@@ -215,6 +220,14 @@ export default function SubjectsScreen() {
             ))}
           </View>
         </View>
+        <Field
+          label="Subtopics (optional)"
+          onChangeText={setSubtopicsText}
+          placeholder={'One subtopic per line'}
+          value={subtopicsText}
+          multiline
+          numberOfLines={4}
+        />
         <ActionButton label="Save topic" onPress={() => void saveTopic()} busy={saving} />
       </Sheet>
     </>

@@ -2,7 +2,7 @@ import { addDays, format } from 'date-fns';
 
 import { supabase } from '@/lib/supabase';
 import { getNeedsPracticeDate, getSkipDate, scheduleRevisions } from '@/lib/revision-cycle';
-import { REVISION_INTERVALS, type Profile, type Revision, type Subject, type Topic } from '@/types';
+import { REVISION_INTERVALS, type CustomEvent, type Profile, type Revision, type Subject, type Topic } from '@/types';
 
 export type SubjectWorkspace = {
   subjects: Subject[];
@@ -87,12 +87,13 @@ export async function createSubject(userId: string, name: string, color: string)
   return data as Subject;
 }
 
-export async function createTopic(userId: string, subjectId: string, name: string, difficulty: Topic['difficulty']) {
+export async function createTopic(userId: string, subjectId: string, name: string, difficulty: Topic['difficulty'], subtopics: string[] = []) {
   const { data, error } = await supabase.from('topics').insert({
     user_id: userId,
     subject_id: subjectId,
     name: name.trim(),
     difficulty,
+    subtopics,
     is_active: true,
   }).select('*, subject:subjects(*)').single();
 
@@ -171,5 +172,46 @@ export async function skipRevision(userId: string, revisionId: string) {
 
 export async function saveRevisionIntervals(userId: string, intervals: number[]) {
   const { error } = await supabase.from('profiles').update({ revision_intervals: intervals }).eq('id', userId);
+  if (error) throw error;
+}
+
+export async function getUpcomingEvents(userId: string) {
+  const startDate = getTodayString();
+  const endDate = format(addDays(new Date(`${startDate}T12:00:00`), 45), 'yyyy-MM-dd');
+  const { data, error } = await supabase
+    .from('events')
+    .select('*')
+    .eq('user_id', userId)
+    .gte('event_date', startDate)
+    .lte('event_date', endDate)
+    .order('event_date');
+
+  if (error) throw error;
+  return (data ?? []) as CustomEvent[];
+}
+
+export async function createCustomEvent(userId: string, title: string, eventDate: string, notes: string | null) {
+  const { data, error } = await supabase.from('events').insert({
+    user_id: userId,
+    title: title.trim(),
+    event_date: eventDate,
+    notes,
+  }).select('*').single();
+  if (error) throw error;
+  return data as CustomEvent;
+}
+
+export async function updateCustomEvent(userId: string, eventId: string, title: string, eventDate: string, notes: string | null) {
+  const { data, error } = await supabase.from('events').update({
+    title: title.trim(),
+    event_date: eventDate,
+    notes,
+  }).eq('id', eventId).eq('user_id', userId).select('*').single();
+  if (error) throw error;
+  return data as CustomEvent;
+}
+
+export async function deleteCustomEvent(userId: string, eventId: string) {
+  const { error } = await supabase.from('events').delete().eq('id', eventId).eq('user_id', userId);
   if (error) throw error;
 }
