@@ -12,7 +12,7 @@ build-android-dev:
 	cd $(MOBILE_DIR) && set -a && . ./.env.local && set +a && npx eas-cli build --platform android --profile development
 
 build-android-prod:
-	cd $(MOBILE_DIR) && set -a && . ./.env.prod && set +a && npx eas-cli build --platform android --profile production
+	cd $(MOBILE_DIR) && set -a && . ./.env.prod && set +a && npx eas-cli build --platform android --profile production-apk
 
 build-ios-dev:
 	cd $(MOBILE_DIR) && set -a && . ./.env.local && set +a && npx eas-cli build --platform ios --profile development
