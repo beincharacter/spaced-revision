@@ -1,26 +1,33 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { format } from 'date-fns';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { ActionButton, AppScreen, Field, PageHeader, Pill, SectionHeading, Surface, TextAction } from '@/components/ui';
 import { openGoogleAuth } from '@/lib/auth';
-import { getProfile, saveRevisionIntervals } from '@/lib/revision-data';
+import { getProfile, saveRevisionIntervals, updateProfile } from '@/lib/revision-data';
 import {
   areRevisionRemindersSupported,
   formatReminderTime,
+  getExamCountdownPreferences,
   getReminderPermissionStatus,
   getReminderPreferences,
   requestRevisionReminderPermission,
+  saveExamCountdownPreferences,
   saveReminderPreferences,
+  syncExamCountdownReminder,
   syncRevisionReminders,
+  type ExamCountdownPreferences,
   type ReminderPermissionStatus,
   type ReminderPreferences,
 } from '@/lib/revision-reminders';
 import { useAuth } from '@/providers/auth-provider';
 import { colors } from '@/theme';
-import { REVISION_CYCLE_PRESETS, REVISION_INTERVALS, type Profile } from '@/types';
+import { EXAM_TEMPLATES, REVISION_CYCLE_PRESETS, REVISION_INTERVALS, type Profile } from '@/types';
+
+const EXAM_OPTIONS = [...Object.keys(EXAM_TEMPLATES), 'Other'];
 
 export default function SettingsScreen() {
   const { user, signOut } = useAuth();
@@ -34,20 +41,32 @@ export default function SettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [savingReminders, setSavingReminders] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [examChoice, setExamChoice] = useState('Other');
+  const [examNameDraft, setExamNameDraft] = useState('');
+  const [examDateDraft, setExamDateDraft] = useState<string | null>(null);
+  const [examDatePickerOpen, setExamDatePickerOpen] = useState(false);
+  const [savingExam, setSavingExam] = useState(false);
+  const [countdownPreferences, setCountdownPreferences] = useState<ExamCountdownPreferences>({ enabled: true, hour: 9, minute: 0 });
+  const [savingCountdown, setSavingCountdown] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     try {
-      const [nextProfile, nextReminderPreferences, nextPermissionStatus] = await Promise.all([
+      const [nextProfile, nextReminderPreferences, nextPermissionStatus, nextCountdownPreferences] = await Promise.all([
         getProfile(user.id),
         getReminderPreferences(user.id),
         getReminderPermissionStatus(),
+        getExamCountdownPreferences(user.id),
       ]);
       setProfile(nextProfile);
       setIntervalDraft((nextProfile?.revision_intervals?.length ? nextProfile.revision_intervals : REVISION_INTERVALS).join(', '));
       setReminderPreferences(nextReminderPreferences);
       setReminderPermission(nextPermissionStatus);
+      setCountdownPreferences(nextCountdownPreferences);
+      setExamChoice(nextProfile?.exam_name && EXAM_TEMPLATES[nextProfile.exam_name] ? nextProfile.exam_name : 'Other');
+      setExamNameDraft(nextProfile?.exam_name && !EXAM_TEMPLATES[nextProfile.exam_name] ? nextProfile.exam_name : '');
+      setExamDateDraft(nextProfile?.target_exam_date ?? null);
     } catch (error) {
       Alert.alert('Could not load settings', error instanceof Error ? error.message : 'Please try again.');
     } finally {
@@ -118,6 +137,75 @@ export default function SettingsScreen() {
     } finally {
       setSavingReminders(false);
     }
+  }
+
+  async function saveExamGoal() {
+    if (!user) return;
+    const examName = examChoice === 'Other' ? examNameDraft.trim() || null : examChoice;
+
+    setSavingExam(true);
+    try {
+      await updateProfile(user.id, { exam_name: examName, target_exam_date: examDateDraft });
+      await refresh();
+      await syncExamCountdownReminder(user.id, examName, examDateDraft);
+      Alert.alert('Exam goal saved', examDateDraft ? 'Your dashboard will now show a daily countdown.' : 'Add a target date to see a countdown on your dashboard.');
+    } catch (error) {
+      Alert.alert('Could not save your exam goal', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setSavingExam(false);
+    }
+  }
+
+  async function applyCountdownPreferences(nextPreferences: ExamCountdownPreferences) {
+    if (!user || !areRevisionRemindersSupported()) return;
+
+    setSavingCountdown(true);
+    try {
+      if (nextPreferences.enabled) {
+        const permissionGranted = await requestRevisionReminderPermission();
+        const nextPermissionStatus = await getReminderPermissionStatus();
+        setReminderPermission(nextPermissionStatus);
+        if (!permissionGranted) {
+          Alert.alert(
+            'Notifications are off',
+            nextPermissionStatus === 'blocked'
+              ? 'Allow notifications for ReviseFlow in your phone settings, then try again.'
+              : 'Allow notifications when your phone asks so the countdown can arrive.'
+          );
+          return;
+        }
+      }
+
+      await saveExamCountdownPreferences(user.id, nextPreferences);
+      setCountdownPreferences(nextPreferences);
+      const scheduledCount = await syncExamCountdownReminder(user.id, profile?.exam_name ?? null, profile?.target_exam_date ?? null);
+
+      if (nextPreferences.enabled) {
+        const timeLabel = formatReminderTime(nextPreferences.hour, nextPreferences.minute);
+        Alert.alert('Daily countdown enabled', scheduledCount ? `You'll get a reminder every day at ${timeLabel} with how many days are left.` : 'Add your exam date above so the countdown has something to count down to.');
+      } else {
+        Alert.alert('Daily countdown turned off', "This phone won't send daily exam countdown reminders anymore.");
+      }
+    } catch (error) {
+      Alert.alert('Could not update the countdown reminder', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setSavingCountdown(false);
+    }
+  }
+
+  function updateCountdownPreferences(nextPreferences: ExamCountdownPreferences) {
+    if (!nextPreferences.enabled) {
+      Alert.alert(
+        'Keep your daily countdown?',
+        'We recommend leaving this on — a daily reminder of how many days are left keeps your exam goal front of mind.',
+        [
+          { text: 'Keep it on', style: 'cancel' },
+          { text: 'Turn off anyway', style: 'destructive', onPress: () => void applyCountdownPreferences(nextPreferences) },
+        ],
+      );
+      return;
+    }
+    void applyCountdownPreferences(nextPreferences);
   }
 
   async function connectCalendar() {
@@ -226,6 +314,66 @@ export default function SettingsScreen() {
                 : reminderPermission === 'not-granted'
                   ? 'Your phone will ask permission the first time you turn reminders on.'
                   : 'Reminders are scheduled on this phone and refreshed when you open the app.'}
+          </Text>
+        </Surface>
+      </View>
+
+      <View>
+        <SectionHeading title="Exam goal" />
+        <Surface style={styles.settingsCard}>
+          <Text style={styles.body}>Pick the exam you&apos;re preparing for and your target date to see a daily countdown.</Text>
+          <Text style={styles.formLabel}>Exam</Text>
+          <ScrollView horizontal contentContainerStyle={styles.presetRow} showsHorizontalScrollIndicator={false}>
+            {EXAM_OPTIONS.map((option) => (
+              <Pill key={option} label={option} selected={examChoice === option} onPress={() => setExamChoice(option)} />
+            ))}
+          </ScrollView>
+          {examChoice === 'Other' ? (
+            <Field label="Exam name" onChangeText={setExamNameDraft} placeholder="e.g. Board exams" value={examNameDraft} maxLength={60} returnKeyType="done" />
+          ) : null}
+          <Text style={styles.formLabel}>Target date</Text>
+          <TextAction
+            label={examDateDraft ? new Intl.DateTimeFormat('en', { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(`${examDateDraft}T12:00:00`)) : 'Choose a date'}
+            onPress={() => setExamDatePickerOpen(true)}
+          />
+          {examDatePickerOpen ? (
+            <DateTimePicker
+              value={examDateDraft ? new Date(`${examDateDraft}T12:00:00`) : new Date()}
+              mode="date"
+              minimumDate={new Date()}
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              onChange={(_event, selectedDate) => {
+                setExamDatePickerOpen(Platform.OS === 'ios');
+                if (selectedDate) setExamDateDraft(format(selectedDate, 'yyyy-MM-dd'));
+              }}
+            />
+          ) : null}
+          <ActionButton label="Save exam goal" onPress={() => void saveExamGoal()} busy={savingExam || loading} />
+        </Surface>
+      </View>
+
+      <View>
+        <SectionHeading title="Exam countdown reminder" />
+        <Surface style={styles.settingsCard}>
+          <View style={styles.reminderToggle}>
+            <View style={styles.reminderCopy}>
+              <Text style={styles.reminderTitle}>Daily countdown</Text>
+              <Text style={styles.body}>Get one notification every morning with how many days are left to your exam.</Text>
+            </View>
+            <Switch
+              accessibilityLabel="Daily exam countdown"
+              accessibilityRole="switch"
+              disabled={!areRevisionRemindersSupported() || savingCountdown || loading}
+              onValueChange={(enabled) => updateCountdownPreferences({ ...countdownPreferences, enabled })}
+              thumbColor="#FFFFFF"
+              trackColor={{ false: '#D8DDE8', true: colors.primary }}
+              value={countdownPreferences.enabled}
+            />
+          </View>
+          <Text style={styles.hint}>
+            {Platform.OS === 'web'
+              ? 'The daily countdown is available in the iOS and Android apps.'
+              : 'We recommend keeping this on to stay accountable to your exam date.'}
           </Text>
         </Surface>
       </View>

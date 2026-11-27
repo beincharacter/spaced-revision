@@ -1,4 +1,4 @@
-import { addDays, format } from 'date-fns';
+import { addDays, differenceInDays, format, startOfDay } from 'date-fns';
 
 import { supabase } from '@/lib/supabase';
 import { getNeedsPracticeDate, getSkipDate, scheduleRevisions } from '@/lib/revision-cycle';
@@ -12,6 +12,11 @@ export type SubjectWorkspace = {
 
 export function getTodayString() {
   return format(new Date(), 'yyyy-MM-dd');
+}
+
+export function getDaysUntil(dateString: string) {
+  const [year, month, day] = dateString.split('-').map(Number);
+  return differenceInDays(new Date(year, month - 1, day, 12), startOfDay(new Date()));
 }
 
 export function formatStudyDate(dateString: string, options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' }) {
@@ -175,6 +180,11 @@ export async function saveRevisionIntervals(userId: string, intervals: number[])
   if (error) throw error;
 }
 
+export async function updateProfile(userId: string, patch: Partial<Profile>) {
+  const { error } = await supabase.from('profiles').update(patch).eq('id', userId);
+  if (error) throw error;
+}
+
 export async function getUpcomingEvents(userId: string) {
   const startDate = getTodayString();
   const endDate = format(addDays(new Date(`${startDate}T12:00:00`), 45), 'yyyy-MM-dd');
@@ -213,5 +223,15 @@ export async function updateCustomEvent(userId: string, eventId: string, title: 
 
 export async function deleteCustomEvent(userId: string, eventId: string) {
   const { error } = await supabase.from('events').delete().eq('id', eventId).eq('user_id', userId);
+  if (error) throw error;
+}
+
+export async function deleteSubjects(userId: string, subjectIds: string[]) {
+  const { error } = await supabase.from('subjects').delete().in('id', subjectIds).eq('user_id', userId);
+  if (error) throw error;
+}
+
+export async function deleteTopics(userId: string, topicIds: string[]) {
+  const { error } = await supabase.from('topics').delete().in('id', topicIds).eq('user_id', userId);
   if (error) throw error;
 }
