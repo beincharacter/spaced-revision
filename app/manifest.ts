@@ -2,28 +2,17 @@ import type { MetadataRoute } from 'next'
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'ReviseFlow — Never Miss a Revision',
+    name: 'ReviseFlow — Spaced Revision Planner',
     short_name: 'ReviseFlow',
     description: 'Modern spaced-revision planner that helps students remember what they study.',
     start_url: '/',
     display: 'standalone',
-    orientation: 'portrait',
-    background_color: '#0f0f11',
+    background_color: '#ffffff',
     theme_color: '#6366f1',
-    categories: ['education', 'productivity'],
     icons: [
-      {
-        src: '/icon.svg',
-        sizes: 'any',
-        type: 'image/svg+xml',
-        purpose: 'any',
-      },
-      {
-        src: '/icon.svg',
-        sizes: 'any',
-        type: 'image/svg+xml',
-        purpose: 'maskable',
-      },
+      { src: '/icons/192', sizes: '192x192', type: 'image/png' },
+      { src: '/icons/512', sizes: '512x512', type: 'image/png' },
+      { src: '/icons/512', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
     ],
   }
 }
