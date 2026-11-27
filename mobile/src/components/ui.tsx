@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type StyleProp, type TextInputProps, type ViewStyle } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type StyleProp, type TextInputProps, type ViewStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors, shadows } from '@/theme';
@@ -51,7 +51,7 @@ export function ActionButton({
 }: {
   label: string;
   onPress: () => void;
-  tone?: 'primary' | 'secondary' | 'quiet' | 'success' | 'warning';
+  tone?: 'primary' | 'secondary' | 'quiet' | 'success' | 'warning' | 'danger';
   icon?: ReactNode;
   busy?: boolean;
   disabled?: boolean;
@@ -59,13 +59,17 @@ export function ActionButton({
 }) {
   const buttonStyle = tone === 'primary'
     ? styles.primaryButton
-    : tone === 'success'
-      ? styles.successButton
-      : tone === 'warning'
-        ? styles.warningButton
-        : tone === 'secondary'
-          ? styles.secondaryButton
-          : styles.quietButton;
+    : tone === 'danger'
+      ? styles.dangerButton
+      : tone === 'success'
+        ? styles.successButton
+        : tone === 'warning'
+          ? styles.warningButton
+          : tone === 'secondary'
+            ? styles.secondaryButton
+            : styles.quietButton;
+
+  const solidTone = tone === 'primary' || tone === 'danger';
 
   return (
     <Pressable
@@ -74,8 +78,8 @@ export function ActionButton({
       onPress={onPress}
       style={({ pressed }) => [buttonStyle, compact && styles.compactButton, (disabled || busy) && styles.disabledButton, pressed && !disabled && styles.pressedButton]}
     >
-      {busy ? <ActivityIndicator color={tone === 'primary' ? '#FFFFFF' : colors.primary} size="small" /> : icon}
-      <Text style={[styles.buttonText, tone !== 'primary' && tone !== 'success' && tone !== 'warning' && styles.secondaryButtonText, compact && styles.compactButtonText]}>
+      {busy ? <ActivityIndicator color={solidTone ? '#FFFFFF' : colors.primary} size="small" /> : icon}
+      <Text style={[styles.buttonText, !solidTone && styles.secondaryButtonText, compact && styles.compactButtonText]}>
         {label}
       </Text>
     </Pressable>
@@ -138,7 +142,7 @@ export function LoadingState({ label = 'Loading your study plan…' }: { label?:
 export function Sheet({ visible, title, onClose, children }: { visible: boolean; title: string; onClose: () => void; children: ReactNode }) {
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
-      <View style={styles.modalOverlay}>
+      <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <Pressable accessibilityLabel="Close dialog" onPress={onClose} style={StyleSheet.absoluteFill} />
         <View style={styles.sheet}>
           <View style={styles.sheetHandle} />
@@ -150,7 +154,7 @@ export function Sheet({ visible, title, onClose, children }: { visible: boolean;
           </View>
           {children}
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -167,6 +171,7 @@ const styles = StyleSheet.create({
   sectionTitle: { color: colors.ink, fontSize: 16, fontWeight: '700' },
   surface: { padding: 16, borderRadius: 18, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, ...shadows.card },
   primaryButton: { minHeight: 48, paddingHorizontal: 16, borderRadius: 12, backgroundColor: colors.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9 },
+  dangerButton: { minHeight: 48, paddingHorizontal: 16, borderRadius: 12, backgroundColor: colors.danger, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9 },
   secondaryButton: { minHeight: 44, paddingHorizontal: 14, borderRadius: 11, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   successButton: { minHeight: 36, paddingHorizontal: 11, borderRadius: 10, backgroundColor: colors.successSoft, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },
   warningButton: { minHeight: 36, paddingHorizontal: 11, borderRadius: 10, backgroundColor: colors.warningSoft, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },

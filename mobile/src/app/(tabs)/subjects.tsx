@@ -4,10 +4,10 @@ import { useCallback, useMemo, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton, AppScreen, EmptyState, Field, PageHeader, Pill, Sheet, Surface, TextAction } from '@/components/ui';
-import { formatStudyDate, getSubjectWorkspace, startTopicSchedule, createSubject, createTopic } from '@/lib/revision-data';
+import { formatStudyDate, getSubjectWorkspace, startTopicSchedule, createSubject, createTopic, deleteSubjects, deleteTopics } from '@/lib/revision-data';
 import { syncRevisionReminders } from '@/lib/revision-reminders';
 import { useAuth } from '@/providers/auth-provider';
-import { colors } from '@/theme';
+import { colors, shadows } from '@/theme';
 import { SUBJECT_COLORS, type Topic } from '@/types';
 
 type WorkspaceState = Awaited<ReturnType<typeof getSubjectWorkspace>>;
@@ -26,6 +26,10 @@ export default function SubjectsScreen() {
   const [difficulty, setDifficulty] = useState<Topic['difficulty']>('medium');
   const [subtopicsText, setSubtopicsText] = useState('');
   const [busyTopicId, setBusyTopicId] = useState<string | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedSubjectIds, setSelectedSubjectIds] = useState<Set<string>>(new Set());
+  const [selectedTopicIds, setSelectedTopicIds] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!user) return;
@@ -100,6 +104,122 @@ export default function SubjectsScreen() {
     }
   }
 
+  function toggleSelectMode() {
+    setSelectMode((prev) => {
+      if (prev) {
+        setSelectedSubjectIds(new Set());
+        setSelectedTopicIds(new Set());
+      }
+      return !prev;
+    });
+  }
+
+  function toggleSubjectSelected(subjectId: string) {
+    const subjectTopicIds = workspace.topics.filter((topic) => topic.subject_id === subjectId).map((topic) => topic.id);
+    setSelectedSubjectIds((prevSubjects) => {
+      const next = new Set(prevSubjects);
+      const selecting = !next.has(subjectId);
+      if (selecting) next.add(subjectId);
+      else next.delete(subjectId);
+
+      setSelectedTopicIds((prevTopics) => {
+        const nextTopics = new Set(prevTopics);
+        subjectTopicIds.forEach((topicId) => {
+          if (selecting) nextTopics.add(topicId);
+          else nextTopics.delete(topicId);
+        });
+        return nextTopics;
+      });
+
+      return next;
+    });
+  }
+
+  function toggleTopicSelected(topicId: string, subjectId: string) {
+    const subjectTopicIds = workspace.topics.filter((topic) => topic.subject_id === subjectId).map((topic) => topic.id);
+    setSelectedTopicIds((prevTopics) => {
+      const nextTopics = new Set(prevTopics);
+      const selecting = !nextTopics.has(topicId);
+      if (selecting) nextTopics.add(topicId);
+      else nextTopics.delete(topicId);
+
+      const allTopicsSelected = subjectTopicIds.length > 0 && subjectTopicIds.every((id) => nextTopics.has(id));
+      setSelectedSubjectIds((prevSubjects) => {
+        const nextSubjects = new Set(prevSubjects);
+        if (allTopicsSelected) nextSubjects.add(subjectId);
+        else nextSubjects.delete(subjectId);
+        return nextSubjects;
+      });
+
+      return nextTopics;
+    });
+  }
+
+  function confirmDeleteSubject(subject: WorkspaceState['subjects'][number]) {
+    Alert.alert(
+      `Delete “${subject.name}”?`,
+      'This also deletes all of its topics and scheduled revisions.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => void runDelete(() => deleteSubjects(user!.id, [subject.id])) },
+      ],
+    );
+  }
+
+  function confirmDeleteTopic(topic: Topic) {
+    Alert.alert(
+      `Delete “${topic.name}”?`,
+      'This also deletes its scheduled revisions.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => void runDelete(() => deleteTopics(user!.id, [topic.id])) },
+      ],
+    );
+  }
+
+  async function runDelete(action: () => Promise<void>) {
+    setDeleting(true);
+    try {
+      await action();
+      await refresh();
+    } catch (error) {
+      Alert.alert('Could not delete', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  function handleBulkDelete() {
+    const subjectIds = Array.from(selectedSubjectIds);
+    // Topics belonging to a selected subject are already covered by the subject's cascade delete.
+    const topicIds = Array.from(selectedTopicIds).filter((topicId) => {
+      const topic = workspace.topics.find((t) => t.id === topicId);
+      return !topic || !selectedSubjectIds.has(topic.subject_id);
+    });
+    const subjectCount = subjectIds.length;
+    const topicCount = topicIds.length;
+    if (!subjectCount && !topicCount) return;
+    const parts = [subjectCount ? `${subjectCount} subject${subjectCount === 1 ? '' : 's'}` : null, topicCount ? `${topicCount} topic${topicCount === 1 ? '' : 's'}` : null].filter(Boolean);
+    Alert.alert(
+      `Delete ${parts.join(' and ')}?`,
+      'This also deletes any topics and scheduled revisions that belong to them.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => void runDelete(async () => {
+            if (subjectCount) await deleteSubjects(user!.id, subjectIds);
+            if (topicCount) await deleteTopics(user!.id, topicIds);
+            setSelectedSubjectIds(new Set());
+            setSelectedTopicIds(new Set());
+            setSelectMode(false);
+          }),
+        },
+      ],
+    );
+  }
+
   async function handleStartPlan(topic: Topic) {
     if (!user) return;
     setBusyTopicId(topic.id);
@@ -125,7 +245,16 @@ export default function SubjectsScreen() {
           eyebrow="Build your study space"
           title="Subjects & topics"
           subtitle={`${workspace.subjects.length} subject${workspace.subjects.length === 1 ? '' : 's'} · ${topicCount} topic${topicCount === 1 ? '' : 's'}`}
-          right={<ActionButton compact label="Add subject" icon={<Ionicons name="add" size={17} color="#FFFFFF" />} onPress={() => setSubjectSheetOpen(true)} />}
+          right={
+            <View style={styles.headerActions}>
+              {workspace.subjects.length ? (
+                <TextAction label={selectMode ? 'Cancel' : 'Select'} onPress={toggleSelectMode} color={colors.muted} />
+              ) : null}
+              {!selectMode ? (
+                <ActionButton compact label="Add subject" icon={<Ionicons name="add" size={17} color="#FFFFFF" />} onPress={() => setSubjectSheetOpen(true)} />
+              ) : null}
+            </View>
+          }
         />
 
         {loading && workspace.subjects.length === 0 ? <View style={styles.loading}><Text style={styles.loadingText}>Loading your subjects…</Text></View> : null}
@@ -144,25 +273,48 @@ export default function SubjectsScreen() {
         <View style={styles.subjectList}>
           {workspace.subjects.map((subject) => {
             const subjectTopics = workspace.topics.filter((topic) => topic.subject_id === subject.id);
+            const subjectSelected = selectedSubjectIds.has(subject.id);
             return (
               <Surface key={subject.id} style={styles.subjectCard}>
-                <View style={styles.subjectHead}>
-                  <View style={[styles.subjectSwatch, { backgroundColor: subject.color || colors.primary }]} />
+                <Pressable
+                  onLongPress={() => !selectMode && confirmDeleteSubject(subject)}
+                  onPress={() => selectMode && toggleSubjectSelected(subject.id)}
+                  style={styles.subjectHead}
+                >
+                  {selectMode ? (
+                    <View style={[styles.checkbox, subjectSelected && styles.checkboxSelected]}>
+                      {subjectSelected ? <Ionicons name="checkmark" size={14} color="#FFFFFF" /> : null}
+                    </View>
+                  ) : (
+                    <View style={[styles.subjectSwatch, { backgroundColor: subject.color || colors.primary }]} />
+                  )}
                   <View style={styles.subjectCopy}>
                     <Text style={styles.subjectName}>{subject.name}</Text>
                     <Text style={styles.subjectMeta}>{subjectTopics.length} topic{subjectTopics.length === 1 ? '' : 's'}</Text>
                   </View>
-                  <TextAction label="＋ Topic" onPress={() => openTopicSheet(subject.id)} />
-                </View>
+                  {!selectMode ? <TextAction label="＋ Topic" onPress={() => openTopicSheet(subject.id)} /> : null}
+                </Pressable>
 
                 {subjectTopics.length ? (
                   <View style={styles.topicList}>
                     {subjectTopics.map((topic) => {
                       const nextDate = latestRevisionByTopic.get(topic.id);
                       const hasStarted = Boolean(topic.first_studied_at);
+                      const topicSelected = selectedTopicIds.has(topic.id);
                       return (
-                        <View key={topic.id} style={styles.topicRow}>
-                          <View style={styles.topicMark}><Ionicons name="bookmark-outline" size={14} color={colors.primary} /></View>
+                        <Pressable
+                          key={topic.id}
+                          onLongPress={() => !selectMode && confirmDeleteTopic(topic)}
+                          onPress={() => selectMode && toggleTopicSelected(topic.id, subject.id)}
+                          style={styles.topicRow}
+                        >
+                          {selectMode ? (
+                            <View style={[styles.checkbox, topicSelected && styles.checkboxSelected]}>
+                              {topicSelected ? <Ionicons name="checkmark" size={14} color="#FFFFFF" /> : null}
+                            </View>
+                          ) : (
+                            <View style={styles.topicMark}><Ionicons name="bookmark-outline" size={14} color={colors.primary} /></View>
+                          )}
                           <View style={styles.topicCopy}>
                             <Text style={styles.topicName} numberOfLines={1}>{topic.name}</Text>
                             <Text style={styles.topicMeta} numberOfLines={1}>
@@ -170,7 +322,7 @@ export default function SubjectsScreen() {
                               {topic.subtopics?.length ? ` · ${topic.subtopics.length} subtopic${topic.subtopics.length === 1 ? '' : 's'}` : ''}
                             </Text>
                           </View>
-                          {!hasStarted ? (
+                          {!selectMode && !hasStarted ? (
                             <ActionButton
                               compact
                               label="Start"
@@ -178,7 +330,7 @@ export default function SubjectsScreen() {
                               busy={busyTopicId === topic.id}
                             />
                           ) : null}
-                        </View>
+                        </Pressable>
                       );
                     })}
                   </View>
@@ -190,6 +342,15 @@ export default function SubjectsScreen() {
           })}
         </View>
       </AppScreen>
+
+      {selectMode && (selectedSubjectIds.size || selectedTopicIds.size) ? (
+        <View style={styles.bulkBar}>
+          <Text style={styles.bulkBarText}>
+            {selectedSubjectIds.size + selectedTopicIds.size} selected
+          </Text>
+          <ActionButton tone="danger" compact label="Delete" onPress={handleBulkDelete} busy={deleting} />
+        </View>
+      ) : null}
 
       <Sheet visible={subjectSheetOpen} title="Add a subject" onClose={() => setSubjectSheetOpen(false)}>
         <Field label="Subject name" onChangeText={setSubjectName} placeholder="e.g. Biology" value={subjectName} maxLength={60} returnKeyType="done" />
@@ -235,6 +396,24 @@ export default function SubjectsScreen() {
 }
 
 const styles = StyleSheet.create({
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  checkbox: { width: 22, height: 22, borderRadius: 7, borderWidth: 1.5, borderColor: colors.line, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface },
+  checkboxSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  bulkBar: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    backgroundColor: colors.ink,
+    ...shadows.card,
+  },
+  bulkBarText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
   subjectList: { gap: 13 },
   subjectCard: { padding: 15, gap: 13 },
   subjectHead: { flexDirection: 'row', alignItems: 'center', gap: 11 },
@@ -243,7 +422,7 @@ const styles = StyleSheet.create({
   subjectName: { color: colors.ink, fontSize: 15, fontWeight: '800' },
   subjectMeta: { marginTop: 3, color: colors.muted, fontSize: 10 },
   topicList: { borderTopWidth: 1, borderTopColor: colors.line },
-  topicRow: { minHeight: 61, flexDirection: 'row', alignItems: 'center', gap: 9, borderBottomWidth: 1, borderBottomColor: colors.line },
+  topicRow: { minHeight: 61, flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 18, borderLeftWidth: 2, borderLeftColor: colors.line, borderBottomWidth: 1, borderBottomColor: colors.line },
   topicMark: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: colors.primarySoft },
   topicCopy: { flex: 1 },
   topicName: { color: colors.ink, fontSize: 12, fontWeight: '700' },

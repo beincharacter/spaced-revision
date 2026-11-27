@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import type { EmailOtpType, Session } from '@supabase/supabase-js';
@@ -6,7 +7,22 @@ import { supabase } from '@/lib/supabase';
 
 WebBrowser.maybeCompleteAuthSession();
 
-export const authRedirectUrl = Linking.createURL('/auth/callback');
+function resolveAuthRedirectUrl() {
+  // Deep links must come back through the `exp://` scheme Expo Go itself owns —
+  // a custom app scheme (e.g. `reviseflow://`) has no OS-level handler while
+  // running inside Expo Go, so the OAuth browser would hang after sign-in
+  // instead of returning to the app. `hostUri` is only populated while connected
+  // to a Metro dev server (i.e. Expo Go or a dev client), so it's a reliable
+  // signal here — unlike `appOwnership`/`executionEnvironment`, which have been
+  // observed misreporting ("bare") inside genuine Expo Go sessions on Android.
+  const hostUri = Constants.expoConfig?.hostUri;
+  if (hostUri) {
+    return `exp://${hostUri}/--/auth/callback`;
+  }
+  return Linking.createURL('/auth/callback');
+}
+
+export const authRedirectUrl = resolveAuthRedirectUrl();
 
 const googleScopes = 'openid email profile https://www.googleapis.com/auth/calendar.events';
 const handledCallbacks = new Set<string>();
@@ -74,6 +90,7 @@ export async function completeAuthCallback(url: string) {
 type GoogleAuthMode = 'sign-in' | 'calendar-link';
 
 export async function openGoogleAuth(mode: GoogleAuthMode) {
+  console.log('[auth] redirectTo =', authRedirectUrl);
   const options = {
     redirectTo: authRedirectUrl,
     scopes: googleScopes,

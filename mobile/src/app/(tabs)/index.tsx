@@ -5,8 +5,8 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'rea
 
 import { AppScreen, EmptyState, PageHeader, SectionHeading, Surface, TextAction } from '@/components/ui';
 import { RevisionRow } from '@/components/RevisionRow';
-import { getDashboardData, getTodayString, markRevisionNeedsPractice, markRevisionWell, skipRevision } from '@/lib/revision-data';
-import { syncRevisionReminders } from '@/lib/revision-reminders';
+import { getDashboardData, getDaysUntil, getTodayString, markRevisionNeedsPractice, markRevisionWell, skipRevision } from '@/lib/revision-data';
+import { syncExamCountdownReminder, syncRevisionReminders } from '@/lib/revision-reminders';
 import { useAuth } from '@/providers/auth-provider';
 import { colors } from '@/theme';
 import type { Revision } from '@/types';
@@ -24,9 +24,14 @@ export default function TodayScreen() {
     if (!user) return;
     setLoading(true);
     try {
-      setDashboard(await getDashboardData(user.id));
+      const nextDashboard = await getDashboardData(user.id);
+      setDashboard(nextDashboard);
       void syncRevisionReminders(user.id).catch((reminderError: unknown) => {
         const message = reminderError instanceof Error ? reminderError.message : 'Unable to refresh revision reminders.';
+        console.warn(message);
+      });
+      void syncExamCountdownReminder(user.id, nextDashboard.profile?.exam_name ?? null, nextDashboard.profile?.target_exam_date ?? null).catch((reminderError: unknown) => {
+        const message = reminderError instanceof Error ? reminderError.message : 'Unable to refresh the exam countdown reminder.';
         console.warn(message);
       });
     } catch (error) {
@@ -64,6 +69,9 @@ export default function TodayScreen() {
   const todayLabel = new Intl.DateTimeFormat('en', { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date());
   const progressTotal = due.length + (dashboard?.completedToday ?? 0);
   const progressRatio = progressTotal ? Math.min(1, (dashboard?.completedToday ?? 0) / progressTotal) : 0;
+  const examName = dashboard?.profile?.exam_name ?? null;
+  const targetExamDate = dashboard?.profile?.target_exam_date ?? null;
+  const daysLeft = targetExamDate ? getDaysUntil(targetExamDate) : null;
 
   return (
     <AppScreen>
@@ -73,6 +81,28 @@ export default function TodayScreen() {
         subtitle="A little progress today adds up."
         right={<View style={styles.headerMark}><Ionicons name="flash" size={18} color={colors.primary} /></View>}
       />
+
+      <Pressable onPress={() => router.push('/(tabs)/settings')}>
+        <Surface style={styles.examCard}>
+          {targetExamDate && daysLeft !== null ? (
+            <>
+              <View style={styles.examCopy}>
+                <Text style={styles.examEyebrow}>{examName ? examName.toUpperCase() : 'YOUR EXAM'}</Text>
+                <Text style={styles.examCaption}>Keep your streak going until the big day.</Text>
+              </View>
+              <View style={styles.examCountdown}>
+                <Text style={styles.examCountdownValue}>{Math.max(0, daysLeft)}</Text>
+                <Text style={styles.examCountdownLabel}>day{Math.max(0, daysLeft) === 1 ? '' : 's'} left</Text>
+              </View>
+            </>
+          ) : (
+            <View style={styles.examCopy}>
+              <Text style={styles.examEyebrow}>NO EXAM SET</Text>
+              <Text style={styles.examCaption}>Add your exam and date in Settings to see a daily countdown.</Text>
+            </View>
+          )}
+        </Surface>
+      </Pressable>
 
       <Surface style={styles.progressCard}>
         <View style={styles.progressTop}>
@@ -145,6 +175,13 @@ export default function TodayScreen() {
 
 const styles = StyleSheet.create({
   headerMark: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: colors.primarySoft },
+  examCard: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  examCopy: { flex: 1, gap: 4 },
+  examEyebrow: { color: colors.primary, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+  examCaption: { color: colors.muted, fontSize: 11, lineHeight: 16 },
+  examCountdown: { alignItems: 'center', minWidth: 56 },
+  examCountdownValue: { color: colors.ink, fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
+  examCountdownLabel: { marginTop: 2, color: colors.muted, fontSize: 9, fontWeight: '700' },
   progressCard: { padding: 18, backgroundColor: colors.ink, borderColor: colors.ink, gap: 16 },
   progressTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 14 },
   progressCopy: { flex: 1 },

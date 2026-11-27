@@ -1,3 +1,4 @@
+import { differenceInCalendarDays } from 'date-fns';
 import * as Notifications from 'expo-notifications';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
@@ -8,17 +9,18 @@ import { supabase } from '@/lib/supabase';
 export type ReminderPreferences = {
   enabled: boolean;
   hour: number;
+  minute: number;
 };
 
 export type ReminderPermissionStatus = 'granted' | 'not-granted' | 'blocked' | 'unavailable';
 
-export const REMINDER_TIME_OPTIONS = [
-  { hour: 8, label: '8 AM' },
-  { hour: 9, label: '9 AM' },
-  { hour: 19, label: '7 PM' },
-] as const;
+export function formatReminderTime(hour: number, minute: number) {
+  const period = hour < 12 ? 'AM' : 'PM';
+  const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+  return `${displayHour}:${String(minute).padStart(2, '0')} ${period}`;
+}
 
-const DEFAULT_PREFERENCES: ReminderPreferences = { enabled: false, hour: 9 };
+const DEFAULT_PREFERENCES: ReminderPreferences = { enabled: false, hour: 9, minute: 0 };
 const REMINDER_KIND = 'revision-reminder';
 const ANDROID_CHANNEL_ID = 'revision-reminders';
 const MAX_SCHEDULED_REMINDER_DATES = 60;
@@ -59,11 +61,12 @@ export async function getReminderPreferences(userId: string): Promise<ReminderPr
     const parsed: unknown = JSON.parse(stored);
     if (typeof parsed !== 'object' || parsed === null) return DEFAULT_PREFERENCES;
 
-    const { enabled, hour } = parsed as Partial<ReminderPreferences>;
-    const allowedHour = REMINDER_TIME_OPTIONS.some((option) => option.hour === hour);
-    if (typeof enabled !== 'boolean' || typeof hour !== 'number' || !allowedHour) return DEFAULT_PREFERENCES;
+    const { enabled, hour, minute } = parsed as Partial<ReminderPreferences>;
+    const validHour = typeof hour === 'number' && hour >= 0 && hour <= 23;
+    const validMinute = typeof minute === 'number' && minute >= 0 && minute <= 59;
+    if (typeof enabled !== 'boolean' || !validHour) return DEFAULT_PREFERENCES;
 
-    return { enabled, hour };
+    return { enabled, hour, minute: validMinute ? minute : 0 };
   } catch {
     return DEFAULT_PREFERENCES;
   }
@@ -158,7 +161,7 @@ async function syncRevisionRemindersForUser(userId: string) {
     .sort(([left], [right]) => left.localeCompare(right))
     .flatMap(([scheduledDate, count]) => {
       const [year, month, day] = scheduledDate.split('-').map(Number);
-      const reminderDate = new Date(year, month - 1, day, preferences.hour, 0, 0, 0);
+      const reminderDate = new Date(year, month - 1, day, preferences.hour, preferences.minute, 0, 0);
       if (Number.isNaN(reminderDate.getTime()) || reminderDate <= now) return [];
 
       const dateLabel = new Intl.DateTimeFormat(undefined, {
@@ -202,4 +205,115 @@ async function configureAndroidChannel() {
     vibrationPattern: [0, 250, 250, 250],
     lightColor: '#5145CD',
   });
+}
+
+const EXAM_COUNTDOWN_KIND = 'exam-countdown-reminder';
+const EXAM_COUNTDOWN_ANDROID_CHANNEL_ID = 'exam-countdown';
+const examCountdownPreferenceKey = (userId: string) => `reviseflow.exam-countdown.${userId}`;
+
+export type ExamCountdownPreferences = {
+  enabled: boolean;
+  hour: number;
+  minute: number;
+};
+
+const DEFAULT_EXAM_COUNTDOWN_PREFERENCES: ExamCountdownPreferences = { enabled: true, hour: 9, minute: 0 };
+
+export async function getExamCountdownPreferences(userId: string): Promise<ExamCountdownPreferences> {
+  if (!areRevisionRemindersSupported()) return DEFAULT_EXAM_COUNTDOWN_PREFERENCES;
+
+  const stored = await SecureStore.getItemAsync(examCountdownPreferenceKey(userId));
+  if (!stored) return DEFAULT_EXAM_COUNTDOWN_PREFERENCES;
+
+  try {
+    const parsed: unknown = JSON.parse(stored);
+    if (typeof parsed !== 'object' || parsed === null) return DEFAULT_EXAM_COUNTDOWN_PREFERENCES;
+
+    const { enabled, hour, minute } = parsed as Partial<ExamCountdownPreferences>;
+    const validHour = typeof hour === 'number' && hour >= 0 && hour <= 23;
+    const validMinute = typeof minute === 'number' && minute >= 0 && minute <= 59;
+    if (typeof enabled !== 'boolean' || !validHour) return DEFAULT_EXAM_COUNTDOWN_PREFERENCES;
+
+    return { enabled, hour, minute: validMinute ? minute : 0 };
+  } catch {
+    return DEFAULT_EXAM_COUNTDOWN_PREFERENCES;
+  }
+}
+
+export async function saveExamCountdownPreferences(userId: string, preferences: ExamCountdownPreferences) {
+  if (!areRevisionRemindersSupported()) return;
+  await SecureStore.setItemAsync(examCountdownPreferenceKey(userId), JSON.stringify(preferences));
+}
+
+async function cancelExamCountdownReminder() {
+  if (!areRevisionRemindersSupported()) return;
+
+  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+  const reminderIds = scheduled
+    .filter((notification) => notification.content.data?.kind === EXAM_COUNTDOWN_KIND)
+    .map((notification) => Notifications.cancelScheduledNotificationAsync(notification.identifier));
+
+  await Promise.all(reminderIds);
+}
+
+async function configureExamCountdownAndroidChannel() {
+  if (Platform.OS !== 'android') return;
+
+  await Notifications.setNotificationChannelAsync(EXAM_COUNTDOWN_ANDROID_CHANNEL_ID, {
+    name: 'Exam countdown',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    sound: 'default',
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: '#5145CD',
+  });
+}
+
+const MAX_SCHEDULED_COUNTDOWN_DAYS = 60;
+
+export async function syncExamCountdownReminder(userId: string, examName: string | null, targetExamDate: string | null) {
+  if (!areRevisionRemindersSupported()) return 0;
+
+  const preferences = await getExamCountdownPreferences(userId);
+  const permissionStatus = await getReminderPermissionStatus();
+
+  await cancelExamCountdownReminder();
+
+  if (!preferences.enabled || permissionStatus !== 'granted' || !targetExamDate) {
+    return 0;
+  }
+
+  await configureExamCountdownAndroidChannel();
+
+  const [year, month, day] = targetExamDate.split('-').map(Number);
+  const examDate = new Date(year, month - 1, day, 12);
+  const now = new Date();
+
+  let scheduled = 0;
+  for (let offset = 0; offset < MAX_SCHEDULED_COUNTDOWN_DAYS; offset += 1) {
+    const reminderDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, preferences.hour, preferences.minute, 0, 0);
+    if (reminderDate <= now) continue;
+
+    const daysLeft = Math.max(0, differenceInCalendarDays(examDate, reminderDate));
+    if (daysLeft <= 0 && offset > 0) break;
+
+    const examLabel = examName ? `your ${examName} exam` : 'your exam';
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: daysLeft === 0 ? "It's exam day!" : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`,
+        body: daysLeft === 0 ? `Today is ${examLabel}. Good luck!` : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left for ${examLabel}. Keep going.`,
+        data: { kind: EXAM_COUNTDOWN_KIND, route: '/(tabs)' },
+        sound: 'default',
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: reminderDate,
+        ...(Platform.OS === 'android' ? { channelId: EXAM_COUNTDOWN_ANDROID_CHANNEL_ID } : {}),
+      },
+    });
+    scheduled += 1;
+
+    if (daysLeft <= 0) break;
+  }
+
+  return scheduled;
 }
